@@ -22,6 +22,12 @@ Usage:
 import time
 import logging
 import uuid
+import sys
+import os
+
+# Add the parent directory to the path to import pyttd
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from pyttd import OpenTTDClient
 
 # Set up clean logging
@@ -52,6 +58,9 @@ class OpenTTDDataMonitor:
         # Set up event handlers
         self.client.on('game_joined', self.on_game_joined)
         
+        # Track if we've shown initial display
+        self._displayed_initial_data = False
+        
         success = self.client.connect()
         if not success:
             logger.error("Failed to connect to server")
@@ -64,14 +73,43 @@ class OpenTTDDataMonitor:
         """Called when we successfully join the game"""
         logger.info("Joined game! Starting data collection...")
         
-        # Wait a moment for initial data packets to arrive
-        time.sleep(3)
+        # Request game info immediately after joining to avoid timeout
+        logger.info("Requesting game info immediately to avoid server timeout...")
+        self.client.request_game_info()
+        
+        # Wait briefly for the response
+        max_wait = 5  # Short wait to avoid server timeout
+        wait_interval = 0.2  # Check every 200ms
+        waited = 0
+        
+        while waited < max_wait:
+            time.sleep(wait_interval)
+            waited += wait_interval
+            
+            # Check if we have received real game data
+            if hasattr(self.client, '_real_game_data') and self.client._real_game_data:
+                logger.info(f"Real game data received after {waited:.1f} seconds!")
+                break
+        else:
+            logger.info("Using available data (real-time server data may arrive later)")
         
         # Display all available data
         self.display_comprehensive_data()
+        self._displayed_initial_data = True
         
-        # Send summary to chat
+        # Send summary to chat  
         self.broadcast_data_summary()
+        
+        # If we didn't get real data, try once more after a short delay
+        if not (hasattr(self.client, '_real_game_data') and self.client._real_game_data):
+            logger.info("Attempting one more request for complete server data...")
+            time.sleep(2)
+            self.client.request_game_info()
+            time.sleep(1)
+            
+            if hasattr(self.client, '_real_game_data') and self.client._real_game_data:
+                logger.info("Updated game data received! Displaying refreshed data...")
+                self.display_comprehensive_data()
         
     def display_comprehensive_data(self):
         """Display all available game state data"""
@@ -100,10 +138,16 @@ class OpenTTDDataMonitor:
         # 7. Vehicle Information
         self.display_vehicle_info()
         
-        # 8. Economic Indicators
+        # 8. Station and Infrastructure Data
+        self.display_station_info()
+        
+        # 9. Industry Information
+        self.display_industry_info()
+        
+        # 10. Economic Indicators
         self.display_economic_info()
         
-        # 9. Performance Metrics
+        # 11. Performance Metrics
         self.display_performance_info()
         
         print("=" * 80)
@@ -122,7 +166,7 @@ class OpenTTDDataMonitor:
         print(f"Connection Status: {game_info.get('status', 'Unknown')}")
         print(f"Game Synchronized: {game_info.get('synchronized', False)}")
         
-        # Show real-time data availability
+        # Show real-time data availability - check if we have current game data
         has_real_data = hasattr(self.client, '_real_game_data') and self.client._real_game_data
         print(f"Real-time Data Available: {'Yes' if has_real_data else 'No'}")
         
@@ -148,7 +192,7 @@ class OpenTTDDataMonitor:
         
     def display_map_info(self):
         """Display map size and terrain information"""
-        print("\n🗺️MAP INFORMATION")
+        print("\nMAP INFORMATION")
         print("-" * 50)
         
         game_info = self.client.get_game_info()
@@ -174,7 +218,7 @@ class OpenTTDDataMonitor:
         game_info = self.client.get_game_info()
         companies = self.client.get_companies()
         
-        # Summary
+        # Summary - use real game data for accurate counts
         companies_active = game_info.get('companies', len(companies))
         companies_max = game_info.get('companies_max', 'Unknown')
         print(f"Active Companies: {companies_active}/{companies_max}")
@@ -190,7 +234,7 @@ class OpenTTDDataMonitor:
         else:
             print("Status: Spectator")
             
-        # Detailed company list
+        # Detailed company list - show what we have tracked, but note the limitation
         if companies:
             print(f"\nDetailed Company List ({len(companies)} tracked):")
             for company_id, company_data in companies.items():
@@ -201,6 +245,12 @@ class OpenTTDDataMonitor:
                 print(f"  {company_type} Company {company_id}: {name} (Manager: {manager})")
         else:
             print("No detailed company data available")
+            
+        # Note about AI companies
+        if companies_active > len(companies):
+            missing_companies = companies_active - len(companies)
+            print(f"\nNote: {missing_companies} additional companies exist (likely AI companies)")
+            print("Detailed information for AI companies requires admin protocol or map parsing")
             
     def display_client_info(self):
         """Display client connection information"""
@@ -247,8 +297,10 @@ class OpenTTDDataMonitor:
             print("Our Company Finances:")
             for key, value in finances.items():
                 if isinstance(value, (int, float)):
-                    if 'rate' in key.lower():
-                        print(f"  {key.replace('_', ' ').title()}: {value}%")
+                    if 'rate' in key.lower() or 'ratio' in key.lower():
+                        print(f"  {key.replace('_', ' ').title()}: {value:.1f}{'%' if 'rate' in key.lower() else ''}")
+                    elif key.lower() in ['company_id', 'inaugurated_year', 'bankrupt_counter', 'is_ai']:
+                        print(f"  {key.replace('_', ' ').title()}: {value}")
                     else:
                         print(f"  {key.replace('_', ' ').title()}: £{value:,}")
                 else:
@@ -262,24 +314,43 @@ class OpenTTDDataMonitor:
             print("\nCompany Performance:")
             for key, value in performance.items():
                 if isinstance(value, (int, float)):
-                    if 'value' in key.lower() or 'money' in key.lower():
+                    if 'value' in key.lower() or 'money' in key.lower() or 'worth' in key.lower():
                         print(f"  {key.replace('_', ' ').title()}: £{value:,}")
-                    elif 'rate' in key.lower():
-                        print(f"  {key.replace('_', ' ').title()}: {value}%")
+                    elif 'rate' in key.lower() or 'rating' in key.lower():
+                        print(f"  {key.replace('_', ' ').title()}: {value}{'%' if 'rate' in key.lower() else ''}")
+                    elif key.lower() in ['age_years', 'loan']:
+                        if key.lower() == 'loan':
+                            print(f"  {key.replace('_', ' ').title()}: £{value:,}")
+                        else:
+                            print(f"  {key.replace('_', ' ').title()}: {value}")
                     else:
                         print(f"  {key.replace('_', ' ').title()}: {value}")
                 else:
                     print(f"  {key.replace('_', ' ').title()}: {value}")
                     
     def display_vehicle_info(self):
-        """Display vehicle statistics and information"""
+        """Display comprehensive vehicle statistics and information"""
         print("\nVEHICLE INFORMATION")
         print("-" * 50)
         
-        # Game-wide vehicle count
-        game_info = self.client.get_game_info()
-        total_vehicles = game_info.get('vehicles', 0)
-        print(f"Total Vehicles in Game: {total_vehicles}")
+        # Try to get comprehensive vehicle data from map parsing
+        comprehensive_stats = self.client.get_comprehensive_vehicle_statistics()
+        map_vehicles = self.client.get_all_vehicles_from_map()
+        
+        # Display total vehicle count
+        total_vehicles = comprehensive_stats.get('total_vehicles', 0)
+        if total_vehicles > 0:
+            print(f"Total Vehicles in Game: {total_vehicles} (from map data)")
+        else:
+            # Fallback to estimation
+            estimated_total = self.client.get_total_vehicle_count()
+            tracked_vehicles = len(self.client.game_state.vehicles)
+            
+            if estimated_total > tracked_vehicles:
+                print(f"Total Vehicles in Game: ~{estimated_total} (estimated)")
+                print(f"Tracked Vehicles: {tracked_vehicles}")
+            else:
+                print(f"Total Vehicles in Game: {tracked_vehicles}")
         
         # Our vehicles
         our_vehicles = self.client.get_our_vehicles()
@@ -291,21 +362,157 @@ class OpenTTDDataMonitor:
                 vehicle_type = vehicle_data.get('type', 'Unknown')
                 vehicle_name = vehicle_data.get('name', f'Vehicle {vehicle_id}')
                 print(f"  {vehicle_type} {vehicle_id}: {vehicle_name}")
-                
-        # Vehicle statistics
-        vehicle_stats = self.client.get_vehicle_statistics()
-        if vehicle_stats:
-            print("\nVehicle Statistics:")
-            for key, value in vehicle_stats.items():
-                if isinstance(value, dict):
-                    print(f"  {key.replace('_', ' ').title()}:")
-                    for sub_key, sub_value in value.items():
-                        print(f"    {sub_key}: {sub_value}")
-                else:
-                    if isinstance(value, (int, float)) and 'profit' in key.lower():
-                        print(f"  {key.replace('_', ' ').title()}: £{value:,}")
+        
+        # Comprehensive vehicle statistics
+        print("\nVehicle Statistics:")
+        for key, value in comprehensive_stats.items():
+            if isinstance(value, dict):
+                print(f"  {key.replace('_', ' ').title()}:")
+                for sub_key, sub_value in value.items():
+                    if isinstance(sub_value, dict):
+                        # Handle nested company data
+                        print(f"    {sub_key.replace('_', ' ').title()}:")
+                        for company_id, count in sub_value.items():
+                            print(f"      Company {company_id}: {count} vehicles")
                     else:
-                        print(f"  {key.replace('_', ' ').title()}: {value}")
+                        print(f"    {sub_key}: {sub_value}")
+            else:
+                if isinstance(value, (int, float)) and 'profit' in key.lower():
+                    print(f"  {key.replace('_', ' ').title()}: £{value:,}")
+                elif 'year' in key.lower():
+                    print(f"  {key.replace('_', ' ').title()}: {value}")
+                else:
+                    print(f"  {key.replace('_', ' ').title()}: {value}")
+        
+        # Additional map-based vehicle information
+        if map_vehicles:
+            print(f"\nDetailed Vehicle Data (from map): {len(map_vehicles)} vehicles found")
+            
+            # Group by company for summary
+            company_vehicles = {}
+            for vehicle in map_vehicles:
+                company_id = vehicle.get('company_id', 0)
+                if company_id not in company_vehicles:
+                    company_vehicles[company_id] = []
+                company_vehicles[company_id].append(vehicle)
+            
+            for company_id, vehicles in company_vehicles.items():
+                print(f"  Company {company_id}: {len(vehicles)} vehicles")
+                
+                # Show vehicle type breakdown
+                type_counts = {"train": 0, "road": 0, "ship": 0, "aircraft": 0}
+                for vehicle in vehicles:
+                    vtype = vehicle.get('vehicle_type', 0)
+                    if vtype == 0:
+                        type_counts["train"] += 1
+                    elif vtype == 1:
+                        type_counts["road"] += 1
+                    elif vtype == 2:
+                        type_counts["ship"] += 1
+                    elif vtype == 3:
+                        type_counts["aircraft"] += 1
+                
+                type_summary = ", ".join([f"{count} {vtype}" for vtype, count in type_counts.items() if count > 0])
+                if type_summary:
+                    print(f"    Types: {type_summary}")
+        else:
+            print("\nNote: Detailed vehicle data requires map parsing")
+                        
+    def display_station_info(self):
+        """Display station and infrastructure information"""
+        print("\nSTATION & INFRASTRUCTURE INFORMATION")
+        print("-" * 50)
+        
+        # Get station data from map parsing
+        stations = self.client.get_all_stations_from_map()
+        
+        if stations:
+            print(f"Total Stations: {len(stations)}")
+            
+            # Group stations by company
+            company_stations = {}
+            for station in stations:
+                company_id = station.get('company_id', 0)
+                if company_id not in company_stations:
+                    company_stations[company_id] = []
+                company_stations[company_id].append(station)
+            
+            print("\nStations by Company:")
+            for company_id, company_stations_list in company_stations.items():
+                print(f"  Company {company_id}: {len(company_stations_list)} stations")
+                
+                # Show sample stations
+                for i, station in enumerate(company_stations_list[:3]):  # Show first 3
+                    name = station.get('name', f'Station {station.get("station_id", i)}')
+                    facilities = station.get('facilities', 0)
+                    
+                    # Decode facility types (simplified)
+                    facility_types = []
+                    if facilities & 1: facility_types.append("Rail")
+                    if facilities & 2: facility_types.append("Airport") 
+                    if facilities & 4: facility_types.append("Truck")
+                    if facilities & 8: facility_types.append("Bus")
+                    if facilities & 16: facility_types.append("Dock")
+                    
+                    facility_str = ", ".join(facility_types) if facility_types else "Unknown"
+                    print(f"    {name} ({facility_str})")
+                
+                if len(company_stations_list) > 3:
+                    print(f"    ... and {len(company_stations_list) - 3} more stations")
+        else:
+            print("Total Stations: Unknown (requires map parsing)")
+            print("\nNote: Station data is available through map parsing")
+            print("Enable detailed map parsing to see station information")
+
+    def display_industry_info(self):
+        """Display industry and economy information"""
+        print("\nINDUSTRY INFORMATION")
+        print("-" * 50)
+        
+        # Get industry data from map parsing
+        industries = self.client.get_all_industries_from_map()
+        
+        if industries:
+            print(f"Total Industries: {len(industries)}")
+            
+            # Group industries by type
+            industry_types = {}
+            for industry in industries:
+                industry_type = industry.get('industry_type', 0)
+                type_name = industry.get('name', f'Industry Type {industry_type}')
+                if type_name not in industry_types:
+                    industry_types[type_name] = 0
+                industry_types[type_name] += 1
+            
+            print("\nIndustries by Type:")
+            for industry_name, count in industry_types.items():
+                print(f"  {industry_name}: {count}")
+            
+            # Show production information for sample industries
+            print(f"\nSample Industry Details:")
+            for i, industry in enumerate(industries[:5]):  # Show first 5
+                name = industry.get('name', f'Industry {i}')
+                production = industry.get('last_month_production', [])
+                accepts = industry.get('accepts_cargo', [])
+                produces = industry.get('produces_cargo', [])
+                
+                print(f"  {name}")
+                if production:
+                    print(f"    Production: {production}")
+                if accepts:
+                    print(f"    Accepts: Cargo types {accepts}")
+                if produces:
+                    print(f"    Produces: Cargo types {produces}")
+            
+            if len(industries) > 5:
+                print(f"  ... and {len(industries) - 5} more industries")
+        else:
+            print("Total Industries: Unknown (requires map parsing)")
+            print("\nNote: Industry data is available through map parsing")
+            print("Enable detailed map parsing to see:")
+            print("  - Industry production rates")
+            print("  - Cargo acceptance and production")
+            print("  - Industry locations and types")
                         
     def display_economic_info(self):
         """Display economic indicators and market information"""
@@ -345,7 +552,7 @@ class OpenTTDDataMonitor:
         print("Affordability Analysis:")
         for amount in test_amounts:
             can_afford = self.client.can_afford(amount)
-            status = "Affordable" if can_afford else "❌ Too expensive"
+            status = "Affordable" if can_afford else "Too expensive"
             print(f"  £{amount:,}: {status}")
             
         # Construction cost estimates
@@ -390,13 +597,22 @@ class OpenTTDDataMonitor:
                 
             logger.info(f"Monitoring for {duration} seconds...")
             
-            # Keep connection alive
+            # Keep connection alive and check for real game data updates
             start_time = time.time()
+            last_real_data_check = False
+            
             while self.client.is_connected() and (time.time() - start_time) < duration:
                 time.sleep(1)
                 
+                # Check if real game data has arrived and we haven't displayed it yet
+                has_real_data = hasattr(self.client, '_real_game_data') and self.client._real_game_data
+                if has_real_data and not last_real_data_check and self._displayed_initial_data:
+                    logger.info("Real-time server data received! Displaying updated information...")
+                    self.display_comprehensive_data()
+                    last_real_data_check = True
+                
         except KeyboardInterrupt:
-            logger.info("👋 Monitoring interrupted by user")
+            logger.info("Monitoring interrupted by user")
         finally:
             if self.client.is_connected():
                 logger.info("Disconnecting...")

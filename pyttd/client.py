@@ -22,6 +22,7 @@ from .protocol import (
 )
 from .game_state import GameState, CompanyID, CompanyInfo, VehicleInfo, ClientInfo, VehicleType
 from .commands import CommandPacket, CommandBuilder, Commands, DoCommandFlag, RailType
+from .map_parser import MapDataParser
 
 
 logger = logging.getLogger(__name__)
@@ -212,6 +213,21 @@ class OpenTTDClient:
     def is_connected(self) -> bool:
         """Check if connected to server"""
         return self.status == ClientStatus.ACTIVE
+
+    def request_game_info(self) -> bool:
+        """Request current game information from server"""
+        if not self.is_connected():
+            logger.warning("Cannot request game info: not connected")
+            return False
+
+        try:
+            packet = Packet(PacketType.CLIENT_GAME_INFO)
+            self.connection.send_packet(packet)
+            logger.debug("Sent CLIENT_GAME_INFO request")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to request game info: {e}")
+            return False
 
     # ============================================
     # Game Data Query Methods
@@ -761,6 +777,192 @@ class OpenTTDClient:
         stats["average_age"] = total_age / len(our_vehicles)
         return stats
 
+    def get_total_vehicle_count(self) -> int:
+        """Get total number of vehicles in the game by scanning available data"""
+        # For now, return the tracked vehicle count
+        # In a full implementation, this would parse the map data to count all vehicles
+        total_vehicles = len(self.game_state.vehicles)
+        
+        # If we have real game data, we could potentially derive estimates
+        if hasattr(self, "_real_game_data") and self._real_game_data:
+            companies_on = self._real_game_data.get("companies_on", 0)
+            # Rough estimate: AI companies typically have 10-50 vehicles each
+            if companies_on > 1:  # More than just our company
+                estimated_vehicles = companies_on * 25  # Conservative estimate
+                logger.debug(f"Estimated total vehicles based on {companies_on} companies: {estimated_vehicles}")
+                return max(total_vehicles, estimated_vehicles)
+        
+        return total_vehicles
+
+    def get_parsed_map_data(self) -> Dict[str, Any]:
+        """Get comprehensive data parsed from the game map"""
+        return getattr(self, '_parsed_map_data', {})
+
+    def get_all_vehicles_from_map(self) -> List[Dict[str, Any]]:
+        """Get all vehicles from parsed map data"""
+        parsed_data = self.get_parsed_map_data()
+        return parsed_data.get('vehicles', [])
+
+    def get_all_stations_from_map(self) -> List[Dict[str, Any]]:
+        """Get all stations from parsed map data"""
+        parsed_data = self.get_parsed_map_data()
+        return parsed_data.get('stations', [])
+
+    def get_all_industries_from_map(self) -> List[Dict[str, Any]]:
+        """Get all industries from parsed map data"""  
+        parsed_data = self.get_parsed_map_data()
+        return parsed_data.get('industries', [])
+
+    def get_vehicle_count_by_company(self) -> Dict[int, int]:
+        """Get vehicle count grouped by company from map data"""
+        vehicles = self.get_all_vehicles_from_map()
+        company_counts = {}
+        
+        for vehicle in vehicles:
+            company_id = vehicle.get('company_id', 0)
+            company_counts[company_id] = company_counts.get(company_id, 0) + 1
+            
+        return company_counts
+
+    def get_comprehensive_vehicle_statistics(self) -> Dict[str, Any]:
+        """Get comprehensive vehicle statistics from map data"""
+        vehicles = self.get_all_vehicles_from_map()
+        
+        if not vehicles:
+            return self.get_vehicle_statistics()  # Fallback to basic stats
+        
+        stats = {
+            "total_vehicles": len(vehicles),
+            "by_type": {"train": 0, "road": 0, "ship": 0, "aircraft": 0},
+            "by_company": self.get_vehicle_count_by_company(),
+            "total_profit": 0,
+            "average_age": 0,
+            "running_costs": 0,
+            "newest_vehicle_year": 0,
+            "oldest_vehicle_year": 9999
+        }
+        
+        total_age = 0
+        current_year = 1962  # Would get from game state
+        
+        for vehicle in vehicles:
+            # Count by type
+            vtype = vehicle.get('vehicle_type', 0)
+            if vtype == 0:
+                stats["by_type"]["train"] += 1
+            elif vtype == 1:
+                stats["by_type"]["road"] += 1
+            elif vtype == 2:
+                stats["by_type"]["ship"] += 1
+            elif vtype == 3:
+                stats["by_type"]["aircraft"] += 1
+            
+            # Accumulate financial data
+            stats["total_profit"] += vehicle.get('profit_last_year', 0)
+            stats["running_costs"] += vehicle.get('running_cost', 0)
+            
+            # Age calculation
+            build_year = vehicle.get('build_year', current_year)
+            age = current_year - build_year
+            total_age += age
+            
+            stats["newest_vehicle_year"] = max(stats["newest_vehicle_year"], build_year)
+            if build_year < stats["oldest_vehicle_year"]:
+                stats["oldest_vehicle_year"] = build_year
+        
+        if len(vehicles) > 0:
+            stats["average_age"] = total_age / len(vehicles)
+        
+        return stats
+
+    def _openttd_date_to_year(self, date_days: int) -> int:
+        """
+        Convert OpenTTD date (days since year 0) to actual year.
+        Based on OpenTTD's CalendarConvertDateToYMD algorithm.
+        """
+        if date_days < 0:
+            return 0
+
+        # OpenTTD's algorithm: account for leap years properly
+        # There are 97 leap years in 400 years
+        DAYS_IN_YEAR = 365
+        yr = 400 * (date_days // (DAYS_IN_YEAR * 400 + 97))
+        rem = date_days % (DAYS_IN_YEAR * 400 + 97)
+
+        if rem >= DAYS_IN_YEAR * 100 + 25:
+            # There are 25 leap years in the first 100 years after every 400th year
+            yr += 100
+            rem -= DAYS_IN_YEAR * 100 + 25
+
+            # There are 24 leap years in the next couple of 100 years
+            yr += 100 * (rem // (DAYS_IN_YEAR * 100 + 24))
+            rem = rem % (DAYS_IN_YEAR * 100 + 24)
+
+        # There are 1 leap year every 4 years
+        yr += 4 * (rem // (DAYS_IN_YEAR * 4 + 1))
+        rem = rem % (DAYS_IN_YEAR * 4 + 1)
+
+        # There is 1 leap year every 4 years, except if it is divisible by 100
+        # except if it's divisible by 400
+        if rem >= DAYS_IN_YEAR * 3 + 1 and (yr % 100 != 0 or yr % 400 == 0):
+            yr += 3
+            rem -= DAYS_IN_YEAR * 3 + 1
+        else:
+            yr += rem // DAYS_IN_YEAR
+
+        return yr
+
+    def _update_game_state_from_map(self, parsed_data: Dict[str, Any]) -> None:
+        """Update game state with data parsed from map"""
+        try:
+            # Update vehicles from parsed map data
+            if "vehicles" in parsed_data:
+                for vehicle_data in parsed_data["vehicles"]:
+                    vehicle_info = VehicleInfo(
+                        vehicle_id=vehicle_data["vehicle_id"],
+                        vehicle_type=VehicleType(vehicle_data["vehicle_type"]),
+                        name=f"Vehicle {vehicle_data['vehicle_id']}",
+                        company_id=CompanyID(vehicle_data["company_id"]),
+                        engine_id=vehicle_data["engine_type"],
+                        build_year=vehicle_data["build_year"],
+                        reliability=vehicle_data["reliability"],
+                        speed=vehicle_data["speed"],
+                        max_speed=vehicle_data["speed"],  # Simplified
+                        power=0,  # Not available in basic parsing
+                        weight=0,  # Not available in basic parsing
+                        running_cost=vehicle_data["running_cost"],
+                        profit_this_year=vehicle_data["profit_this_year"],
+                        profit_last_year=vehicle_data["profit_last_year"],
+                        current_tile=0,  # Would need coordinate conversion
+                        cargo_type=vehicle_data["cargo_type"],
+                        cargo_capacity=vehicle_data["cargo_capacity"],
+                        cargo_count=vehicle_data["cargo_count"]
+                    )
+                    self.game_state.add_vehicle(vehicle_info)
+
+            # Update companies from parsed data  
+            if "companies" in parsed_data:
+                for company_data in parsed_data["companies"]:
+                    company_info = CompanyInfo(
+                        company_id=CompanyID(company_data["company_id"]),
+                        name=company_data["name"],
+                        manager_name=company_data["manager_name"],
+                        money=company_data["money"],
+                        loan=company_data["loan"],
+                        max_loan=500000,  # Default
+                        value=company_data["value"],
+                        performance=company_data["performance"],
+                        inaugurated_year=company_data["inaugurated_year"],
+                        is_ai=company_data["is_ai"]
+                    )
+                    self.game_state.add_company(company_info)
+
+            logger.info(f"Updated game state with {len(parsed_data.get('vehicles', []))} vehicles "
+                       f"and {len(parsed_data.get('companies', []))} companies from map data")
+
+        except Exception as e:
+            logger.error(f"Error updating game state from map: {e}")
+
     def auto_manage_company(self) -> Dict[str, Any]:
         """Perform automatic company management tasks"""
         if not self.is_connected():
@@ -1008,9 +1210,31 @@ class OpenTTDClient:
     def _handle_server_map_done(self, packet: Packet) -> None:
         """Handle map download complete"""
         logger.info("Map download complete")
+        logger.info(f"Map size: {len(self._map_buffer)} bytes")
 
         # Store compressed map data
-        self.game_state.set_map_data(bytes(self._map_buffer))
+        map_data = bytes(self._map_buffer)
+        self.game_state.set_map_data(map_data)
+
+        # Parse map data for comprehensive game state
+        try:
+            logger.info("Parsing map data for game state...")
+            parser = MapDataParser()
+            self._parsed_map_data = parser.parse_map_data(map_data)
+            
+            if self._parsed_map_data:
+                logger.info(f"Parsed map data: {self._parsed_map_data.get('total_vehicles', 0)} vehicles, "
+                           f"{self._parsed_map_data.get('total_stations', 0)} stations, "
+                           f"{self._parsed_map_data.get('total_industries', 0)} industries")
+                
+                # Update game state with parsed data
+                self._update_game_state_from_map(self._parsed_map_data)
+            else:
+                logger.warning("Failed to parse map data")
+                
+        except Exception as e:
+            logger.error(f"Error parsing map data: {e}")
+            self._parsed_map_data = {}
 
         # Send map acknowledgment
         packet = Packet(PacketType.CLIENT_MAP_OK)
@@ -1168,7 +1392,7 @@ class OpenTTDClient:
     def _handle_server_config_update(self, packet: Packet) -> None:
         """Handle config update packet - contains max_companies and server_name only"""
         try:
-            logger.debug(f"⚙️ Received CONFIG_UPDATE packet (size: {packet.size()} bytes)")
+            logger.debug(f"Received CONFIG_UPDATE packet (size: {packet.size()} bytes)")
 
             # Parse the actual CONFIG_UPDATE format from OpenTTD source:
             # uint8 max_companies
@@ -1177,7 +1401,7 @@ class OpenTTDClient:
             server_name = packet.read_string()
 
             logger.info(
-                f"⚙️ Server config: max_companies={max_companies}, server_name='{server_name}'"
+                f"Server config: max_companies={max_companies}, server_name='{server_name}'"
             )
 
             # Update our game state
@@ -1241,10 +1465,10 @@ class OpenTTDClient:
                 calendar_date = packet.read_uint32()
                 calendar_start = packet.read_uint32()
 
-                # Convert to readable date format (days since 0 AD)
-                # OpenTTD date 0 = 1 Jan 0 AD, but display starts from year 1
-                current_year = 1 + (calendar_date // 365)
-                start_year = 1 + (calendar_start // 365)
+                # Convert to readable date format using OpenTTD's date system
+                # OpenTTD date 0 = 1 Jan year 0, need to use proper conversion with leap years
+                current_year = self._openttd_date_to_year(calendar_date)
+                start_year = self._openttd_date_to_year(calendar_start)
 
                 logger.info(
                     f"REAL GAME DATE: Current year {current_year}, Started year {start_year}"

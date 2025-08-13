@@ -1,14 +1,20 @@
 # PyTTD - Python OpenTTD Client Library
 
-[![PyPI version](https://badge.fury.io/py/pyttd.svg)](https://badge.fury.io/py/pyttd)
+[![PyPI version](https://img.shields.io/pypi/v/pyttd.svg)](https://pypi.org/project/pyttd/)
 [![Python versions](https://img.shields.io/pypi/pyversions/pyttd.svg)](https://pypi.org/project/pyttd/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A Python client library for connecting to [OpenTTD](https://www.openttd.org/) servers. Create AI bots, manage companies, and interact with OpenTTD games programmatically with **real-time data** and **without admin port**.
+A Python library for connecting to [OpenTTD](https://www.openttd.org/) servers as a client. Create AI bots, manage companies, and interact with OpenTTD games programmatically with **real-time data** and **without admin port access**.
 
 ## Features
 
-todo
+| Feature                         | Status           |
+|---------------------------------|------------------|
+| Multiplayer protocol            | ![Done](https://img.shields.io/badge/status-done-brightgreen)            |
+| Commands                        | ![Done](https://img.shields.io/badge/status-done-brightgreen)            |
+| Game state                      | ![Done](https://img.shields.io/badge/status-done-brightgreen)            |
+| Map data                        | ![In Progress](https://img.shields.io/badge/status-in%20progress-yellow) |
+| High level functions            | ![In Progress](https://img.shields.io/badge/status-in%20progress-yellow) |
 
 ## Installation
 
@@ -57,7 +63,7 @@ client.disconnect()
 
 ## Real-Time Data Features
 
-PyTTD provides real-time data that matches what other players see in the OpenTTD GUI:
+PyTTD provides real-time data that matches the current gamestate (as reported by the server):
 
 ```python
 from pyttd import OpenTTDClient
