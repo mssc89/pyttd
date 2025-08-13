@@ -57,7 +57,7 @@ client.disconnect()
 
 ## Real-Time Data Features
 
-PyTTD provides accurate real-time data that matches what other players see in the OpenTTD GUI:
+PyTTD provides real-time data that matches what other players see in the OpenTTD GUI:
 
 ```python
 from pyttd import OpenTTDClient
@@ -91,12 +91,6 @@ print(f"Company Value: £{performance['company_value']:,}")
 python examples/data_display.py
 ```
 Displays all available real-time game state information in a clean, organized format.
-
-### Company Bot
-```bash  
-python examples/company_bot.py
-```
-Advanced bot that automatically manages company operations, finances, and optimization.
 
 ### Chat Bot
 ```bash
@@ -170,7 +164,7 @@ client = OpenTTDClient(
 
 ## Requirements
 
-- **Python**: 3.7 or higher
+- **Python**: 3.11 or higher
 - **OpenTTD Server**: Tested with 14.1
 
 ## Development

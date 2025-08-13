@@ -7,9 +7,9 @@ import os
 import sys
 from setuptools import setup, find_packages
 
-# Ensure we're running on Python 3.7+
-if sys.version_info < (3, 7):
-    sys.exit("PyTTD requires Python 3.7 or higher")
+# Ensure we're running on Python 3.11+
+if sys.version_info < (3, 11):
+    sys.exit("PyTTD requires Python 3.11 or higher")
 
 # Read the long description from README
 def read_readme():
@@ -50,10 +50,7 @@ setup(
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
         "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.7",
-        "Programming Language :: Python :: 3.8",
-        "Programming Language :: Python :: 3.9",
-        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
         "Programming Language :: Python :: 3.11",
         "Programming Language :: Python :: 3.12",
         "Topic :: Games/Entertainment :: Simulation",
@@ -65,7 +62,7 @@ setup(
         "openttd", "transport", "tycoon", "simulation", "game", "ai", "bot", 
         "client", "network", "protocol", "multiplayer", "automation"
     ],
-    python_requires=">=3.7",
+    python_requires=">=3.11",
     install_requires=[],
     extras_require={
         "dev": [
