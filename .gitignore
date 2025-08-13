@@ -146,7 +146,3 @@ dmypy.json
 openttd-*
 OpenTTD-*
 *.tar.gz
-
-# Test files
-test_*.py
-*_test.py
