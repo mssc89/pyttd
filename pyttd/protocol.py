@@ -160,7 +160,7 @@ class Packet:
         data = self.buffer.read(1)
         if not data:
             raise EOFError("Unexpected end of packet")
-        return struct.unpack("<B", data)[0]
+        return int(struct.unpack("<B", data)[0])
 
     def read_bool(self) -> bool:
         """Read a boolean (sent as uint8)"""
@@ -171,21 +171,21 @@ class Packet:
         data = self.buffer.read(2)
         if len(data) != 2:
             raise EOFError("Unexpected end of packet")
-        return struct.unpack("<H", data)[0]
+        return int(struct.unpack("<H", data)[0])
 
     def read_uint32(self) -> int:
         """Read a 32-bit unsigned integer"""
         data = self.buffer.read(4)
         if len(data) != 4:
             raise EOFError("Unexpected end of packet")
-        return struct.unpack("<L", data)[0]
+        return int(struct.unpack("<L", data)[0])
 
     def read_uint64(self) -> int:
         """Read a 64-bit unsigned integer"""
         data = self.buffer.read(8)
         if len(data) != 8:
             raise EOFError("Unexpected end of packet")
-        return struct.unpack("<Q", data)[0]
+        return int(struct.unpack("<Q", data)[0])
 
     def read_string(self) -> str:
         """Read a null-terminated string"""

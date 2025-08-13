@@ -194,7 +194,7 @@ class ClientInfo:
 class GameState:
     """Manages the complete game state"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         # Basic game info
         self.game_date = GameDate()
         self.frame = 0
