@@ -337,7 +337,9 @@ class OpenTTDClient:
             logger.error(f"Failed to send command: {e}")
             return False
 
-    def build_rail(self, start: Tuple[int, int], end: Tuple[int, int], rail_type: RailType = RailType.RAIL) -> bool:
+    def build_rail(
+        self, start: Tuple[int, int], end: Tuple[int, int], rail_type: RailType = RailType.RAIL
+    ) -> bool:
         """
         Build railroad track between two coordinates
 
@@ -357,7 +359,9 @@ class OpenTTDClient:
         )
         return self.send_command(command)
 
-    def build_train_depot(self, x: int, y: int, direction: int = 0, rail_type: RailType = RailType.RAIL) -> bool:
+    def build_train_depot(
+        self, x: int, y: int, direction: int = 0, rail_type: RailType = RailType.RAIL
+    ) -> bool:
         """Build a train depot at coordinates"""
         tile = coordinate_to_tile(x, y, self.game_state.map_info.size_x)
         command = CommandBuilder.build_train_depot(
@@ -737,7 +741,7 @@ class OpenTTDClient:
         for vehicle in our_vehicles.values():
             vtype = getattr(vehicle, "vehicle_type", VehicleType.TRAIN)
             # Convert VehicleType enum to string for the dictionary key
-            vtype_str = vtype.name.lower() if hasattr(vtype, 'name') else str(vtype).lower()
+            vtype_str = vtype.name.lower() if hasattr(vtype, "name") else str(vtype).lower()
             by_type = stats["by_type"]
             if isinstance(by_type, dict) and vtype_str in by_type:
                 by_type[vtype_str] = int(by_type[vtype_str]) + 1
@@ -745,9 +749,13 @@ class OpenTTDClient:
             total_profit = stats["total_profit"]
             running_costs = stats["running_costs"]
             if isinstance(total_profit, (int, float)):
-                stats["total_profit"] = int(total_profit) + int(getattr(vehicle, "profit_last_year", 0))
+                stats["total_profit"] = int(total_profit) + int(
+                    getattr(vehicle, "profit_last_year", 0)
+                )
             if isinstance(running_costs, (int, float)):
-                stats["running_costs"] = int(running_costs) + int(getattr(vehicle, "running_cost", 0))
+                stats["running_costs"] = int(running_costs) + int(
+                    getattr(vehicle, "running_cost", 0)
+                )
             total_age += getattr(vehicle, "age", 0)
 
         stats["average_age"] = total_age / len(our_vehicles)
