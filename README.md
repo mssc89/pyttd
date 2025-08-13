@@ -102,7 +102,7 @@ Basic example showing connection, company creation, and chat interaction.
 ```bash
 python examples/manager_bot.py
 ```
-Demonstrates comprehensive company management features and financial tracking.
+Demonstrates company management features and financial tracking.
 
 ### Financial Manager
 ```bash

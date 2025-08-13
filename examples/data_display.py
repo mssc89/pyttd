@@ -62,7 +62,7 @@ class OpenTTDDataMonitor:
         
     def on_game_joined(self):
         """Called when we successfully join the game"""
-        logger.info("Joined game! Starting comprehensive data collection...")
+        logger.info("Joined game! Starting data collection...")
         
         # Wait a moment for initial data packets to arrive
         time.sleep(3)

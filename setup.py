@@ -78,7 +78,7 @@ setup(
     },
     entry_points={
         "console_scripts": [
-            "pyttd-example=pyttd.examples.comprehensive_data_display:main",
+            "pyttd-example=pyttd.examples.data_display:main",
         ],
     },
     package_data={

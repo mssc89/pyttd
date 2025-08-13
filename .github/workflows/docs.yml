@@ -26,8 +26,8 @@ jobs:
     - name: Test examples
       run: |
         # Test that examples can be imported without errors
-        python -c "import sys; sys.path.append('examples'); import comprehensive_data_display"
-        python -c "import sys; sys.path.append('examples'); import simple_chat_bot"
+        python -c "import sys; sys.path.append('examples'); import data_display"
+        python -c "import sys; sys.path.append('examples'); import chat_bot"
         
     - name: Check README links
       run: |

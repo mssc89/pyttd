@@ -50,7 +50,7 @@ Documentation = "https://github.com/mssc89/pyttd#readme"
 "Source Code" = "https://github.com/mssc89/pyttd"
 
 [project.scripts]
-pyttd-example = "pyttd.examples.comprehensive_data_display:main"
+pyttd-example = "pyttd.examples.data_display:main"
 
 [tool.setuptools]
 packages = ["pyttd"]

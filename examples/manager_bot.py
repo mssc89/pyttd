@@ -3,7 +3,7 @@
 Company Manager Bot Example
 ============================
 
-This bot demonstrates comprehensive company management features:
+This bot demonstrates company management features:
 1. Creating and managing companies
 2. Financial operations (loans, money transfers)
 3. Company customization (names, colors)
