@@ -8,10 +8,10 @@ with real-time data.
 
 Usage:
     from pyttd import OpenTTDClient
-    
+
     client = OpenTTDClient("127.0.0.1", 3979)
     client.connect()
-    
+
     # Get real-time game data
     game_info = client.get_game_info()
     print(f"Game year: {game_info['current_year']}")
@@ -29,16 +29,16 @@ __description__ = "Python OpenTTD Client Library"
 __url__ = "https://github.com/mssc89/pyttd"
 
 __all__ = [
-    'OpenTTDClient',
-    'Packet', 
-    'PacketType',
-    'GameState',
-    'CompanyInfo',
-    'ClientInfo', 
-    'VehicleInfo',
-    'MapInfo',
-    'Commands',
-    'CommandBuilder',
-    'CommandPacket',
-    'CompanyID'
+    "OpenTTDClient",
+    "Packet",
+    "PacketType",
+    "GameState",
+    "CompanyInfo",
+    "ClientInfo",
+    "VehicleInfo",
+    "MapInfo",
+    "Commands",
+    "CommandBuilder",
+    "CommandPacket",
+    "CompanyID",
 ]
