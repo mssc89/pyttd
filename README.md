@@ -4,17 +4,22 @@
 [![Python versions](https://img.shields.io/pypi/pyversions/pyttd.svg)](https://pypi.org/project/pyttd/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Finally, a Python client library for connecting to [OpenTTD](https://www.openttd.org/) servers **as a player**, and **parsing maps!**. Create AI bots, manage companies, and interact with OpenTTD games programmatically  **with real-time data** and **without admin port access**.
+Finally, a Python client library for connecting to [OpenTTD](https://www.openttd.org/) servers **as a player** and **parsing maps!** Create AI bots, manage companies, and interact with OpenTTD games programmatically  **with real-time data** and **without admin port access**.
 
 ## Features
 
-| Feature                         | Status           |
-|---------------------------------|------------------|
-| Multiplayer protocol            | ![Done](https://img.shields.io/badge/status-done-brightgreen)            |
-| Commands                        | ![Done](https://img.shields.io/badge/status-done-brightgreen)            |
-| Game state                      | ![Done](https://img.shields.io/badge/status-done-brightgreen)            |
-| Save file parsing               | ![Done](https://img.shields.io/badge/status-done-brightgreen)            |
-| High level functions            | ![In Progress](https://img.shields.io/badge/status-in%20progress-yellow) |
+| Feature                         | Status                                                                   | Remarks
+|---------------------------------|--------------------------------------------------------------------------|------------------------------------------
+| Multiplayer protocol            | ![Done](https://img.shields.io/badge/status-done-brightgreen)            | -                                       |
+| Commands                        | ![Done](https://img.shields.io/badge/status-done-brightgreen)            | Might have missed some                  |
+| Game state                      | ![Done](https://img.shields.io/badge/status-done-brightgreen)            | As far as possible without save parsing |
+| Save file parsing               | ![In Progress](https://img.shields.io/badge/status-in%20progress-yellow) | Game data and companies work            |
+| High level functions            | ![In Progress](https://img.shields.io/badge/status-in%20progress-yellow) | Helpers for common high-level tasks     |
+
+## Requirements
+
+- **Python**: 3.11 or higher
+- **OpenTTD Server**: Tested with 14.1
 
 ## Installation
 
@@ -61,33 +66,31 @@ if client.get_our_company():
 client.disconnect()
 ```
 
-## Real-Time Data Features
+### Save File Parsing
 
-PyTTD provides real-time data that matches the current gamestate (as reported by the server):
+PyTTD includes a save file parser module that can extract detailed game data from OpenTTD save files.
 
 ```python
-from pyttd import OpenTTDClient
+from pyttd import load_save_file
 
-client = OpenTTDClient()
-client.connect()
+# Parse a save file
+game_data = load_save_file("path/to/savefile.sav")
 
-# Real-time game state
-game_info = client.get_game_info()
-print(f"Current Game Year: {game_info['current_year']}")  # e.g., 1964
-print(f"Game Started: {game_info['start_year']}")         # e.g., 1950
-print(f"Companies Active: {game_info['companies']}")       # e.g., 8/15
-print(f"Players Online: {game_info['clients']}")          # e.g., 12/25
+# Access parsed data
+print(f"Save version: {game_data['meta']['save_version']}")
+print(f"Map size: {game_data['statistics']['map_size']}")
+print(f"Companies: {game_data['statistics']['companies_count']}")
 
-# Company information
-companies = client.get_companies()
-for company_id, company in companies.items():
-    print(f"Company {company_id}: {company['name']}")
+# Company information with financial data
+for company in game_data['companies']:
+    print(f"{company['name']}: £{company['money']:,} (AI: {company['is_ai']})")
     
-# Financial analysis  
-finances = client.get_company_finances()
-performance = client.get_company_performance()
-print(f"Net Worth: £{finances['net_worth']:,}")
-print(f"Company Value: £{performance['company_value']:,}")
+# Game date and economy
+date = game_data['game']['date']['calendar_date']
+print(f"Game date: {date['year']}-{date['month']}-{date['day']}")
+
+economy = game_data['game']['economy']
+print(f"Interest rate: {economy['interest_rate']}%")
 ```
 
 ## Examples
@@ -96,7 +99,7 @@ print(f"Company Value: £{performance['company_value']:,}")
 ```bash
 python examples/data_display.py
 ```
-Displays all available real-time game state information in a clean, organized format.
+Displays all available real-time game state information.
 
 ### Chat Bot
 ```bash
@@ -143,7 +146,7 @@ client = OpenTTDClient(
 - `client.is_connected()` - Check connection status
 
 #### Game Information
-- `client.get_game_info()` - Complete game state information
+- `client.get_game_info()` - Game state information
 - `client.get_map_info()` - Map size and terrain data  
 - `client.get_economic_status()` - Economic indicators
 
@@ -167,42 +170,10 @@ client = OpenTTDClient(
 #### Communication
 - `client.send_chat(message)` - Send public chat message
 - `client.send_chat_to_company(message, company_id)` - Company chat
-- `client.broadcast_status()` - Broadcast bot status
 
 #### Maps
 TODO: describe it here
 
-### Save File Parsing
-
-PyTTD includes a save file parser module that can extract detailed game data from OpenTTD save files.
-
-```python
-from pyttd import load_save_file
-
-# Parse a save file
-game_data = load_save_file("path/to/savefile.sav")
-
-# Access parsed data
-print(f"Save version: {game_data['meta']['save_version']}")
-print(f"Map size: {game_data['statistics']['map_size']}")
-print(f"Companies: {game_data['statistics']['companies_count']}")
-
-# Company information with financial data
-for company in game_data['companies']:
-    print(f"{company['name']}: £{company['money']:,} (AI: {company['is_ai']})")
-    
-# Game date and economy
-date = game_data['game']['date']['calendar_date']
-print(f"Game date: {date['year']}-{date['month']}-{date['day']}")
-
-economy = game_data['game']['economy']
-print(f"Interest rate: {economy['interest_rate']}%")
-```
-
-## Requirements
-
-- **Python**: 3.11 or higher
-- **OpenTTD Server**: Tested with 14.1
 
 ## Development
 
