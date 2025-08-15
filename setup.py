@@ -11,23 +11,26 @@ from setuptools import setup, find_packages
 if sys.version_info < (3, 11):
     sys.exit("PyTTD requires Python 3.11 or higher")
 
+
 # Read the long description from README
 def read_readme():
-    readme_path = os.path.join(os.path.dirname(__file__), 'README.md')
+    readme_path = os.path.join(os.path.dirname(__file__), "README.md")
     try:
-        with open(readme_path, 'r', encoding='utf-8') as f:
+        with open(readme_path, "r", encoding="utf-8") as f:
             return f.read()
     except FileNotFoundError:
         return "A Python client library for OpenTTD"
 
+
 # Read version from package
 def get_version():
-    version_file = os.path.join(os.path.dirname(__file__), 'pyttd', '__init__.py')
-    with open(version_file, 'r', encoding='utf-8') as f:
+    version_file = os.path.join(os.path.dirname(__file__), "pyttd", "__init__.py")
+    with open(version_file, "r", encoding="utf-8") as f:
         for line in f:
-            if line.startswith('__version__'):
-                return line.split('=')[1].strip().strip('"\'')
+            if line.startswith("__version__"):
+                return line.split("=")[1].strip().strip("\"'")
     return "1.0.0"
+
 
 setup(
     name="pyttd",
@@ -59,8 +62,18 @@ setup(
         "Topic :: System :: Networking",
     ],
     keywords=[
-        "openttd", "transport", "tycoon", "simulation", "game", "ai", "bot", 
-        "client", "network", "protocol", "multiplayer", "automation"
+        "openttd",
+        "transport",
+        "tycoon",
+        "simulation",
+        "game",
+        "ai",
+        "bot",
+        "client",
+        "network",
+        "protocol",
+        "multiplayer",
+        "automation",
     ],
     python_requires=">=3.11",
     install_requires=[],

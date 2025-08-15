@@ -146,3 +146,6 @@ dmypy.json
 openttd-*
 OpenTTD-*
 *.tar.gz
+
+# Development scripts
+pre-publish.sh

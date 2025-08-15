@@ -1,6 +1,6 @@
 """Command System
 
-This module implements the command system used by OpenTTD for executing game actions.
+This module implements the command system used for executing game actions.
 All commands must be synchronized with the server to prevent desyncs.
 """
 

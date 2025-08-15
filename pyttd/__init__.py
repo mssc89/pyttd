@@ -19,9 +19,19 @@ Usage:
 """
 
 from .client import OpenTTDClient
-from .protocol import Packet, PacketType
-from .game_state import GameState, CompanyInfo, ClientInfo, VehicleInfo, MapInfo
-from .commands import Commands, CommandBuilder, CommandPacket, CompanyID
+from .network import Packet, PacketType
+from .game import (
+    GameState,
+    CompanyInfo,
+    ClientInfo,
+    VehicleInfo,
+    MapInfo,
+    Commands,
+    CommandBuilder,
+    CommandPacket,
+    CompanyID,
+)
+from .saveload import SaveLoader, load_save_file
 
 __version__ = "1.0.0"
 __author__ = "mssc89"
@@ -41,4 +51,6 @@ __all__ = [
     "CommandBuilder",
     "CommandPacket",
     "CompanyID",
+    "SaveLoader",
+    "load_save_file",
 ]

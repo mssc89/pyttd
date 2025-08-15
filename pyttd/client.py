@@ -1,7 +1,7 @@
 """Client Implementation
 
 Main client class that implements the OpenTTD multiplayer protocol.
-Handles connection, authentication, map synchronization, and game state management.
+Handles connection, authentication, synchronization, and commands.
 """
 
 import asyncio
@@ -12,17 +12,16 @@ import logging
 from typing import Optional, Callable, Dict, Any, List, Tuple, Union
 from enum import Enum
 
-from .protocol import (
+from .network.protocol import (
     NetworkConnection,
     Packet,
     PacketType,
     NetworkError,
     coordinate_to_tile,
-    tile_to_coordinate,
 )
-from .game_state import GameState, CompanyID, CompanyInfo, VehicleInfo, ClientInfo, VehicleType
-from .commands import CommandPacket, CommandBuilder, Commands, DoCommandFlag, RailType
-from .map_parser import MapDataParser
+from .game.game_state import GameState, CompanyID, CompanyInfo, VehicleInfo, ClientInfo, VehicleType
+from .game.commands import CommandPacket, CommandBuilder, Commands, DoCommandFlag, RailType
+from .saveload.save_parser import SaveLoader
 
 
 logger = logging.getLogger(__name__)
@@ -59,8 +58,8 @@ class OpenTTDClient:
         self,
         server: str,
         port: int = 3979,
-        player_name: str = "AI_Player",
-        company_name: str = "AI Co",
+        player_name: str = "Player",
+        company_name: str = "Company",
         password: str = "",
         company_password: str = "",
         timeout: float = 30.0,
@@ -235,7 +234,7 @@ class OpenTTDClient:
 
     def get_game_info(self) -> Dict[str, Any]:
         """Get game information"""
-        # Use real game data from SERVER_GAME_INFO if available
+        # Use game data from SERVER_GAME_INFO if available
         if hasattr(self, "_real_game_data") and self._real_game_data:
             real_data = self._real_game_data
             return {
@@ -260,7 +259,7 @@ class OpenTTDClient:
                 "status": self.status.value,
             }
         else:
-            # Fallback to old method if no real game data available
+            # Fallback if no game data available yet
             return {
                 "client_id": self.game_state.client_id,
                 "company_id": self.game_state.company_id,
@@ -293,37 +292,16 @@ class OpenTTDClient:
 
         return {cid: asdict(client) for cid, client in self.game_state.clients.items()}
 
-    def get_vehicles(self) -> Dict[int, Any]:
-        """Get information about all vehicles"""
-        from dataclasses import asdict
-
-        return {vid: asdict(vehicle) for vid, vehicle in self.game_state.vehicles.items()}
-
-    def get_our_vehicles(self) -> Dict[int, Any]:
-        """Get vehicles belonging to our company"""
-        if self.game_state.company_id is None or self.game_state.company_id == 255:
-            return {}
-        from dataclasses import asdict
-
-        return {
-            vid: asdict(vehicle)
-            for vid, vehicle in self.game_state.vehicles.items()
-            if vehicle.company_id == self.game_state.company_id
-        }
-
     def get_map_info(self) -> Dict[str, Any]:
         """Get map information"""
         return {
             "size_x": self.game_state.map_info.size_x,
             "size_y": self.game_state.map_info.size_y,
-            "total_tiles": self.game_state.map_info.size_x * self.game_state.map_info.size_y,
-            "has_map_data": hasattr(self.game_state.map_info, "compressed_data")
-            and self.game_state.map_info.compressed_data is not None,
         }
 
     def send_command(self, command: CommandPacket) -> bool:
         """
-        Send command to server for execution
+        Send command to server
 
         Args:
             command: Command packet to send
@@ -338,7 +316,7 @@ class OpenTTDClient:
         try:
             packet = Packet(PacketType.CLIENT_COMMAND)
             packet.write_uint8(command.company)
-            packet.write_uint16(command.command_id)  # Fixed: uint16 not uint32
+            packet.write_uint16(command.command_id)
             packet.write_uint16(0)  # err_msg field (STR_NULL = 0)
             packet.write_buffer(command.encode_parameters())
             packet.write_uint8(command.callback_id)
@@ -393,8 +371,19 @@ class OpenTTDClient:
         )
         return self.send_command(command)
 
+    def get_economic_status(self) -> dict:
+        """Get general economic information about the game"""
+        return {
+            "inflation_payment": self.game_state.economy.inflation_rates.get("payment", 1.0),
+            "inflation_construction": self.game_state.economy.inflation_rates.get(
+                "construction", 1.0
+            ),
+            "interest_rate": self.game_state.economy.interest_rate,
+            "max_loan_default": self.game_state.economy.max_loan,
+        }
+
     # ============================================
-    # Enhanced Building and Construction Methods
+    # Building and Construction Methods
     # ============================================
 
     def create_company(self, company_name: str = "Bot Company", password: str = "") -> bool:
@@ -497,7 +486,7 @@ class OpenTTDClient:
                 tile_x = x + dx
                 tile_y = y + dy
                 # Use landscape clear command
-                # This is a simplified version - real implementation would batch commands
+                # This is a simplified version - would batch commands
                 try:
                     # Would use CMD_LANDSCAPE_CLEAR command here
                     success_count += 1
@@ -542,7 +531,7 @@ class OpenTTDClient:
         command = CommandBuilder.increase_loan(amount, int(self.game_state.company_id))
         success = self.send_command(command)
         if success:
-            logger.info(f"💰 Requested loan increase of £{amount:,}")
+            logger.info(f"Requested loan increase of £{amount:,}")
         return success
 
     def decrease_loan(self, amount: int) -> bool:
@@ -554,7 +543,7 @@ class OpenTTDClient:
         command = CommandBuilder.decrease_loan(amount, int(self.game_state.company_id))
         success = self.send_command(command)
         if success:
-            logger.info(f"💳 Requested loan decrease of £{amount:,}")
+            logger.info(f"Requested loan decrease of £{amount:,}")
         return success
 
     def rename_company(self, new_name: str) -> bool:
@@ -570,8 +559,8 @@ class OpenTTDClient:
         command = CommandBuilder.rename_company(new_name, int(self.game_state.company_id))
         success = self.send_command(command)
         if success:
-            logger.info(f"🏢 Requested company rename to: '{new_name}'")
-            self.company_name = new_name  # Update our local record
+            logger.info(f"Requested company rename to: '{new_name}'")
+            self.company_name = new_name
         return success
 
     def rename_president(self, new_name: str) -> bool:
@@ -587,7 +576,7 @@ class OpenTTDClient:
         command = CommandBuilder.rename_president(new_name, int(self.game_state.company_id))
         success = self.send_command(command)
         if success:
-            logger.info(f"👤 Requested president rename to: '{new_name}'")
+            logger.info(f"Requested president rename to: '{new_name}'")
         return success
 
     def set_company_colour(self, scheme: int = 0, primary: bool = True, colour: int = 0) -> bool:
@@ -602,7 +591,7 @@ class OpenTTDClient:
         success = self.send_command(command)
         if success:
             logger.info(
-                f"🎨 Requested colour change: scheme={scheme}, primary={primary}, colour={colour}"
+                f"Requested colour change: scheme={scheme}, primary={primary}, colour={colour}"
             )
         return success
 
@@ -619,266 +608,13 @@ class OpenTTDClient:
         command = CommandBuilder.give_money(amount, dest_company, int(self.game_state.company_id))
         success = self.send_command(command)
         if success:
-            logger.info(f"💸 Requested money transfer: £{amount:,} to Company {dest_company}")
+            logger.info(f"Requested money transfer: £{amount:,} to Company {dest_company}")
         return success
-
-    def get_company_finances(self) -> dict:
-        """Get current company financial information"""
-        our_company = self.get_our_company()
-        if not our_company:
-            return {}
-
-        # Convert CompanyInfo to dict for finances
-        from dataclasses import asdict
-
-        finances = asdict(our_company)
-
-        # Calculate derived values
-        finances["net_worth"] = finances["money"] + finances["value"] - finances["loan"]
-        finances["available_credit"] = finances["max_loan"] - finances["loan"]
-        finances["debt_ratio"] = (
-            finances["loan"] / max(finances["value"], 1) if finances["value"] > 0 else 1.0
-        )
-
-        return finances
-
-    def get_company_performance(self) -> dict:
-        """Get company performance metrics"""
-        finances = self.get_company_finances()
-        if not finances:
-            return {}
-
-        # Basic performance metrics
-        performance = {
-            "company_value": finances.get("value", 0),
-            "performance_rating": finances.get("performance", 0),
-            "money": finances.get("money", 0),
-            "loan": finances.get("loan", 0),
-            "net_worth": finances.get("net_worth", 0),
-            "age_years": 2024 - finances.get("inaugurated_year", 2024),  # Approximate age
-            "is_profitable": finances.get("money", 0) > 0,
-        }
-
-        return performance
-
-    def get_economic_status(self) -> dict:
-        """Get general economic information about the game"""
-        return {
-            "inflation_payment": self.game_state.economy.inflation_rates.get("payment", 1.0),
-            "inflation_construction": self.game_state.economy.inflation_rates.get(
-                "construction", 1.0
-            ),
-            "interest_rate": self.game_state.economy.interest_rate,
-            "max_loan_default": self.game_state.economy.max_loan,
-        }
-
-    def calculate_loan_interest(self, loan_amount: Optional[int] = None) -> int:
-        """Calculate annual loan interest for given amount (or current loan)"""
-        if loan_amount is None:
-            finances = self.get_company_finances()
-            if finances:
-                loan_amount = finances.get("loan", 0)
-            else:
-                loan_amount = 0
-
-        interest_rate = self.game_state.economy.interest_rate
-        return int(loan_amount * interest_rate / 100)
-
-    # ============================================
-    # AI/Bot Helper Methods
-    # ============================================
-
-    def find_suitable_depot_location(
-        self, near_x: int, near_y: int, search_radius: int = 10
-    ) -> Optional[Tuple[int, int]]:
-        """Find a suitable location for building a depot near given coordinates"""
-        # This would analyze the map to find flat, empty land
-        # For now, return a simple offset
-        return (near_x + 2, near_y + 2)
-
-    def find_best_route(
-        self, start: Tuple[int, int], end: Tuple[int, int]
-    ) -> List[Tuple[int, int]]:
-        """Find the best route between two points (simplified pathfinding)"""
-        # Simple straight-line pathfinding for now
-        # Real implementation would consider terrain, existing infrastructure, cost
-        path = []
-        x1, y1 = start
-        x2, y2 = end
-
-        # Simple straight line
-        steps = max(abs(x2 - x1), abs(y2 - y1))
-        if steps == 0:
-            return [start]
-
-        for i in range(steps + 1):
-            x = x1 + (x2 - x1) * i // steps
-            y = y1 + (y2 - y1) * i // steps
-            path.append((x, y))
-
-        return path
-
-    def estimate_construction_cost(
-        self, start: Tuple[int, int], end: Tuple[int, int], construction_type: str = "rail"
-    ) -> int:
-        """Estimate the cost of construction between two points"""
-        # Simplified cost estimation
-        distance = abs(end[0] - start[0]) + abs(end[1] - start[1])
-
-        cost_per_tile = {"rail": 100, "road": 80, "station": 500, "depot": 1000, "bridge": 2000}
-
-        return distance * cost_per_tile.get(construction_type, 100)
-
-    def can_afford(self, estimated_cost: int) -> bool:
-        """Check if we can afford a construction project"""
-        finances = self.get_company_finances()
-        if not finances:
-            return False
-
-        available_money = finances["money"] + finances.get("max_loan", 500000) - finances["loan"]
-        return bool(available_money >= estimated_cost * 1.2)  # 20% safety margin
-
-    def get_vehicle_statistics(self) -> Dict[str, Any]:
-        """Get statistics about our vehicles"""
-        our_vehicles = self.get_our_vehicles()
-
-        stats = {
-            "total_vehicles": len(our_vehicles),
-            "by_type": {"train": 0, "road": 0, "ship": 0, "aircraft": 0},
-            "total_profit": 0,
-            "average_age": 0,
-            "running_costs": 0,
-        }
-
-        if not our_vehicles:
-            return stats
-
-        total_age = 0
-        for vehicle in our_vehicles.values():
-            vtype = getattr(vehicle, "vehicle_type", VehicleType.TRAIN)
-            # Convert VehicleType enum to string for the dictionary key
-            vtype_str = vtype.name.lower() if hasattr(vtype, "name") else str(vtype).lower()
-            by_type = stats["by_type"]
-            if isinstance(by_type, dict) and vtype_str in by_type:
-                by_type[vtype_str] = int(by_type[vtype_str]) + 1
-
-            total_profit = stats["total_profit"]
-            running_costs = stats["running_costs"]
-            if isinstance(total_profit, (int, float)):
-                stats["total_profit"] = int(total_profit) + int(
-                    getattr(vehicle, "profit_last_year", 0)
-                )
-            if isinstance(running_costs, (int, float)):
-                stats["running_costs"] = int(running_costs) + int(
-                    getattr(vehicle, "running_cost", 0)
-                )
-            total_age += getattr(vehicle, "age", 0)
-
-        stats["average_age"] = total_age / len(our_vehicles)
-        return stats
-
-    def get_total_vehicle_count(self) -> int:
-        """Get total number of vehicles in the game by scanning available data"""
-        # For now, return the tracked vehicle count
-        # In a full implementation, this would parse the map data to count all vehicles
-        total_vehicles = len(self.game_state.vehicles)
-        
-        # If we have real game data, we could potentially derive estimates
-        if hasattr(self, "_real_game_data") and self._real_game_data:
-            companies_on = self._real_game_data.get("companies_on", 0)
-            # Rough estimate: AI companies typically have 10-50 vehicles each
-            if companies_on > 1:  # More than just our company
-                estimated_vehicles = companies_on * 25  # Conservative estimate
-                logger.debug(f"Estimated total vehicles based on {companies_on} companies: {estimated_vehicles}")
-                return max(total_vehicles, estimated_vehicles)
-        
-        return total_vehicles
-
-    def get_parsed_map_data(self) -> Dict[str, Any]:
-        """Get comprehensive data parsed from the game map"""
-        return getattr(self, '_parsed_map_data', {})
-
-    def get_all_vehicles_from_map(self) -> List[Dict[str, Any]]:
-        """Get all vehicles from parsed map data"""
-        parsed_data = self.get_parsed_map_data()
-        return parsed_data.get('vehicles', [])
-
-    def get_all_stations_from_map(self) -> List[Dict[str, Any]]:
-        """Get all stations from parsed map data"""
-        parsed_data = self.get_parsed_map_data()
-        return parsed_data.get('stations', [])
-
-    def get_all_industries_from_map(self) -> List[Dict[str, Any]]:
-        """Get all industries from parsed map data"""  
-        parsed_data = self.get_parsed_map_data()
-        return parsed_data.get('industries', [])
-
-    def get_vehicle_count_by_company(self) -> Dict[int, int]:
-        """Get vehicle count grouped by company from map data"""
-        vehicles = self.get_all_vehicles_from_map()
-        company_counts = {}
-        
-        for vehicle in vehicles:
-            company_id = vehicle.get('company_id', 0)
-            company_counts[company_id] = company_counts.get(company_id, 0) + 1
-            
-        return company_counts
-
-    def get_comprehensive_vehicle_statistics(self) -> Dict[str, Any]:
-        """Get comprehensive vehicle statistics from map data"""
-        vehicles = self.get_all_vehicles_from_map()
-        
-        if not vehicles:
-            return self.get_vehicle_statistics()  # Fallback to basic stats
-        
-        stats = {
-            "total_vehicles": len(vehicles),
-            "by_type": {"train": 0, "road": 0, "ship": 0, "aircraft": 0},
-            "by_company": self.get_vehicle_count_by_company(),
-            "total_profit": 0,
-            "average_age": 0,
-            "running_costs": 0,
-            "newest_vehicle_year": 0,
-            "oldest_vehicle_year": 9999
-        }
-        
-        total_age = 0
-        current_year = 1962  # Would get from game state
-        
-        for vehicle in vehicles:
-            # Count by type
-            vtype = vehicle.get('vehicle_type', 0)
-            if vtype == 0:
-                stats["by_type"]["train"] += 1
-            elif vtype == 1:
-                stats["by_type"]["road"] += 1
-            elif vtype == 2:
-                stats["by_type"]["ship"] += 1
-            elif vtype == 3:
-                stats["by_type"]["aircraft"] += 1
-            
-            # Accumulate financial data
-            stats["total_profit"] += vehicle.get('profit_last_year', 0)
-            stats["running_costs"] += vehicle.get('running_cost', 0)
-            
-            # Age calculation
-            build_year = vehicle.get('build_year', current_year)
-            age = current_year - build_year
-            total_age += age
-            
-            stats["newest_vehicle_year"] = max(stats["newest_vehicle_year"], build_year)
-            if build_year < stats["oldest_vehicle_year"]:
-                stats["oldest_vehicle_year"] = build_year
-        
-        if len(vehicles) > 0:
-            stats["average_age"] = total_age / len(vehicles)
-        
-        return stats
 
     def _openttd_date_to_year(self, date_days: int) -> int:
         """
         Convert OpenTTD date (days since year 0) to actual year.
-        Based on OpenTTD's CalendarConvertDateToYMD algorithm.
+        Based on CalendarConvertDateToYMD algorithm.
         """
         if date_days < 0:
             return 0
@@ -912,95 +648,8 @@ class OpenTTDClient:
 
         return yr
 
-    def _update_game_state_from_map(self, parsed_data: Dict[str, Any]) -> None:
-        """Update game state with data parsed from map"""
-        try:
-            # Update vehicles from parsed map data
-            if "vehicles" in parsed_data:
-                for vehicle_data in parsed_data["vehicles"]:
-                    vehicle_info = VehicleInfo(
-                        vehicle_id=vehicle_data["vehicle_id"],
-                        vehicle_type=VehicleType(vehicle_data["vehicle_type"]),
-                        name=f"Vehicle {vehicle_data['vehicle_id']}",
-                        company_id=CompanyID(vehicle_data["company_id"]),
-                        engine_id=vehicle_data["engine_type"],
-                        build_year=vehicle_data["build_year"],
-                        reliability=vehicle_data["reliability"],
-                        speed=vehicle_data["speed"],
-                        max_speed=vehicle_data["speed"],  # Simplified
-                        power=0,  # Not available in basic parsing
-                        weight=0,  # Not available in basic parsing
-                        running_cost=vehicle_data["running_cost"],
-                        profit_this_year=vehicle_data["profit_this_year"],
-                        profit_last_year=vehicle_data["profit_last_year"],
-                        current_tile=0,  # Would need coordinate conversion
-                        cargo_type=vehicle_data["cargo_type"],
-                        cargo_capacity=vehicle_data["cargo_capacity"],
-                        cargo_count=vehicle_data["cargo_count"]
-                    )
-                    self.game_state.add_vehicle(vehicle_info)
-
-            # Update companies from parsed data  
-            if "companies" in parsed_data:
-                for company_data in parsed_data["companies"]:
-                    company_info = CompanyInfo(
-                        company_id=CompanyID(company_data["company_id"]),
-                        name=company_data["name"],
-                        manager_name=company_data["manager_name"],
-                        money=company_data["money"],
-                        loan=company_data["loan"],
-                        max_loan=500000,  # Default
-                        value=company_data["value"],
-                        performance=company_data["performance"],
-                        inaugurated_year=company_data["inaugurated_year"],
-                        is_ai=company_data["is_ai"]
-                    )
-                    self.game_state.add_company(company_info)
-
-            logger.info(f"Updated game state with {len(parsed_data.get('vehicles', []))} vehicles "
-                       f"and {len(parsed_data.get('companies', []))} companies from map data")
-
-        except Exception as e:
-            logger.error(f"Error updating game state from map: {e}")
-
-    def auto_manage_company(self) -> Dict[str, Any]:
-        """Perform automatic company management tasks"""
-        if not self.is_connected():
-            return {"error": "Not connected"}
-
-        actions_taken = []
-
-        # Check finances
-        finances = self.get_company_finances()
-        if finances and finances["money"] < 10000:
-            actions_taken.append("Low money warning")
-
-        # Check vehicle performance
-        vehicle_stats = self.get_vehicle_statistics()
-        if vehicle_stats["total_vehicles"] > 0:
-            avg_profit = vehicle_stats["total_profit"] / vehicle_stats["total_vehicles"]
-            if avg_profit < 0:
-                actions_taken.append("Vehicles losing money")
-
-        # Basic maintenance checks
-        our_vehicles = self.get_our_vehicles()
-        old_vehicles = [v for v in our_vehicles.values() if getattr(v, "age", 0) > 20]
-        if old_vehicles:
-            actions_taken.append(f"{len(old_vehicles)} vehicles need replacement")
-
-        return {
-            "actions_taken": actions_taken,
-            "finances": finances,
-            "vehicle_stats": vehicle_stats,
-            "recommendation": (
-                "Consider expanding rail network"
-                if finances and finances["money"] > 50000
-                else "Focus on profitability"
-            ),
-        }
-
     # ============================================
-    # Advanced Chat and Communication
+    # Chat and Communication
     # ============================================
 
     def send_chat_to_company(self, message: str, company_id: int) -> bool:
@@ -1010,44 +659,6 @@ class OpenTTDClient:
     def send_chat_to_client(self, message: str, client_id: int) -> bool:
         """Send a private message to a specific client"""
         return self.send_chat(message, destination_type=2, destination=client_id)
-
-    def broadcast_status(self) -> bool:
-        """Broadcast our current status to all players"""
-        info = self.get_game_info()
-        company = self.get_our_company()
-        finances = self.get_company_finances()
-
-        if company and finances:
-            status_msg = (
-                f"Bot Status: {info['vehicles']} vehicles, "
-                f"£{finances['money']:,} money, "
-                f"Frame {info['frame']}"
-            )
-        else:
-            status_msg = f"Bot Status: Spectating, Frame {info['frame']}"
-
-        return self.send_chat(status_msg)
-
-    def respond_to_chat(self, sender: str, message: str) -> bool:
-        """Respond intelligently to chat messages directed at us"""
-        message_lower = message.lower()
-
-        if "status" in message_lower or "info" in message_lower:
-            return self.broadcast_status()
-        elif "help" in message_lower:
-            help_msg = "Bot Commands: 'status', 'help', 'finances', 'vehicles'"
-            return self.send_chat(help_msg)
-        elif "finances" in message_lower:
-            finances = self.get_company_finances()
-            if finances:
-                msg = f"Finances: £{finances['money']:,} cash, £{finances['loan']:,} loan"
-                return self.send_chat(msg)
-        elif "vehicles" in message_lower:
-            stats = self.get_vehicle_statistics()
-            msg = f"Vehicles: {stats['total_vehicles']} total, Profit: £{stats['total_profit']:,}"
-            return self.send_chat(msg)
-
-        return False
 
     def _network_loop(self) -> None:
         """Main network processing loop (runs in separate thread)"""
@@ -1216,42 +827,29 @@ class OpenTTDClient:
         map_data = bytes(self._map_buffer)
         self.game_state.set_map_data(map_data)
 
-        # Parse map data for comprehensive game state
         try:
-            logger.info("Parsing map data for game state...")
-            parser = MapDataParser()
-            self._parsed_map_data = parser.parse_map_data(map_data)
-            
-            if self._parsed_map_data:
-                logger.info(f"Parsed map data: {self._parsed_map_data.get('total_vehicles', 0)} vehicles, "
-                           f"{self._parsed_map_data.get('total_stations', 0)} stations, "
-                           f"{self._parsed_map_data.get('total_industries', 0)} industries")
-                
-                # Update game state with parsed data
-                self._update_game_state_from_map(self._parsed_map_data)
-            else:
-                logger.warning("Failed to parse map data")
-                
+            logger.info("Parsing map data...")
+            # TODO: add parser call here
+
         except Exception as e:
             logger.error(f"Error parsing map data: {e}")
-            self._parsed_map_data = {}
+            # self._parsed_map_data = {}
 
-        # Send map acknowledgment
+        # Send acknowledgment
         packet = Packet(PacketType.CLIENT_MAP_OK)
         self.connection.send_packet(packet)
 
         self._emit_event("map_complete")
 
     def _handle_server_join(self, packet: Packet) -> None:
-        """Handle successful join - we're now active!"""
+        """Handle successful join"""
         joining_client_id = packet.read_uint32()
 
         if joining_client_id == self.game_state.client_id:
-            logger.info("Successfully joined game!")
+            logger.info("Joined the game!")
             self.status = ClientStatus.ACTIVE
 
             # If we joined with COMPANY_NEW_COMPANY, automatically send company creation command
-            # This matches OpenTTD's network_client.cpp line 901 behavior
             if self.game_state.company_id == CompanyID.COMPANY_NEW_COMPANY:
                 logger.info(
                     f"Sending automatic CMD_COMPANY_CTRL for company creation (current company_id: {self.game_state.company_id})"
@@ -1273,7 +871,6 @@ class OpenTTDClient:
             token = None
 
             # The remaining data could be: [seed1, [seed2,]] [token]
-            # We need to try different combinations
             remaining_bytes = packet.size() - packet.buffer.tell()
             logger.debug(f"SERVER_FRAME has {remaining_bytes} remaining bytes after frame data")
 
@@ -1300,10 +897,9 @@ class OpenTTDClient:
             self.game_state.update_frame(frame, frame_max, seed1, seed2)
 
             # Send acknowledgment (only if frame has advanced and we're fully active)
-            # Real OpenTTD clients send ACKs much less frequently - roughly every 75 frames or 2 seconds
             if frame > self._last_ack_frame and self.status == ClientStatus.ACTIVE:
                 current_time = time.time()
-                # Match real client behavior: ACK every ~2 seconds, not every frame
+                # Match real client behavior: ACK every ~2 seconds (~75 frames)
                 if current_time - self._last_ack_time > 2.0 or frame - self._last_ack_frame >= 75:
                     self._last_ack_frame = frame
                     self._last_ack_time = current_time
@@ -1332,10 +928,8 @@ class OpenTTDClient:
             self.game_state.random_seed2 = seed2
 
             # Don't send ACK for sync packets - only SERVER_FRAME packets should trigger ACKs
-            # The server expects ACKs only in response to SERVER_FRAME packets with tokens
         except EOFError as e:
             logger.error(f"Sync packet too short: {e}")
-            # Don't re-raise - continue processing
 
     def _handle_server_command(self, packet: Packet) -> None:
         """Handle command execution packet"""
@@ -1373,30 +967,24 @@ class OpenTTDClient:
         logger.debug(f"Client {client_id} left the game")
 
     def _handle_server_company_update(self, packet: Packet) -> None:
-        """Handle company update packet - contains company password flags only"""
+        """Handle company update packet
+        Contains company password flags only"""
         try:
-            logger.debug(f"📊 Received COMPANY_UPDATE packet (size: {packet.size()} bytes)")
+            logger.debug(f"Received COMPANY_UPDATE packet (size: {packet.size()} bytes)")
 
-            # Parse the actual COMPANY_UPDATE format from OpenTTD source:
-            # uint16 company_passworded (bitfield of which companies have passwords)
             company_passworded = packet.read_uint16()
 
-            logger.debug(f"📊 Company password flags: 0x{company_passworded:04x}")
-
-            # Note: This packet doesn't contain financial data or company details
-            # That information comes from the map data or command responses
+            logger.debug(f"Company password flags: 0x{company_passworded:04x}")
 
         except Exception as e:
             logger.debug(f"Error in company update handler: {e}")
 
     def _handle_server_config_update(self, packet: Packet) -> None:
-        """Handle config update packet - contains max_companies and server_name only"""
+        """Handle config update packet
+        Contains max_companies and server_name only"""
         try:
             logger.debug(f"Received CONFIG_UPDATE packet (size: {packet.size()} bytes)")
 
-            # Parse the actual CONFIG_UPDATE format from OpenTTD source:
-            # uint8 max_companies
-            # string server_name
             max_companies = packet.read_uint8()
             server_name = packet.read_string()
 
@@ -1404,7 +992,6 @@ class OpenTTDClient:
                 f"Server config: max_companies={max_companies}, server_name='{server_name}'"
             )
 
-            # Update our game state
             if hasattr(self.game_state, "max_companies"):
                 self.game_state.max_companies = max_companies
             if hasattr(self.game_state, "server_name"):
@@ -1414,12 +1001,10 @@ class OpenTTDClient:
             logger.debug(f"Error reading config update: {e}")
 
     def _handle_server_game_info(self, packet: Packet) -> None:
-        """Handle SERVER_GAME_INFO packet - contains real-time game state data"""
+        """Handle SERVER_GAME_INFO packet
+        Contains game state data"""
         try:
             logger.debug(f"Received SERVER_GAME_INFO packet (size: {packet.size()} bytes)")
-
-            # Parse SERVER_GAME_INFO packet format based on OpenTTD 14.1 source
-            # SerializeNetworkGameInfo in network_game_info.cpp lines 187-254
 
             game_info_version = packet.read_uint8()  # NETWORK_GAME_INFO_VERSION
             logger.debug(f"Game info version: {game_info_version}")
@@ -1461,32 +1046,26 @@ class OpenTTDClient:
                         packet.read_string()  # GRF name
 
             if game_info_version >= 3:
-                # NETWORK_GAME_INFO_VERSION = 3 - KEY DATA WE WANT!
                 calendar_date = packet.read_uint32()
                 calendar_start = packet.read_uint32()
 
-                # Convert to readable date format using OpenTTD's date system
-                # OpenTTD date 0 = 1 Jan year 0, need to use proper conversion with leap years
                 current_year = self._openttd_date_to_year(calendar_date)
                 start_year = self._openttd_date_to_year(calendar_start)
 
-                logger.info(
-                    f"REAL GAME DATE: Current year {current_year}, Started year {start_year}"
-                )
+                logger.info(f"Current year {current_year}, Started year {start_year}")
 
             else:
                 calendar_date = 0
                 calendar_start = 0
-                current_year = 1950  # Fallback
+                current_year = 1950
                 start_year = 1950
 
             if game_info_version >= 2:
-                # NETWORK_GAME_INFO_VERSION = 2 - COMPANY DATA WE WANT!
                 companies_max = packet.read_uint8()
-                companies_on = packet.read_uint8()  # This is the REAL company count!
-                packet.read_uint8()  # Skip old max-spectators field
+                companies_on = packet.read_uint8()
+                packet.read_uint8()
 
-                logger.info(f"REAL COMPANY DATA: {companies_on}/{companies_max} companies active")
+                logger.info(f" {companies_on}/{companies_max} companies active")
 
             else:
                 companies_max = 15
@@ -1497,17 +1076,15 @@ class OpenTTDClient:
             server_revision = packet.read_string()
             use_password = packet.read_bool()
             clients_max = packet.read_uint8()
-            clients_on = packet.read_uint8()  # This is the REAL client count!
+            clients_on = packet.read_uint8()
             spectators_on = packet.read_uint8()
             map_width = packet.read_uint16()
             map_height = packet.read_uint16()
             landscape = packet.read_uint8()
             dedicated = packet.read_bool()
 
-            # Update our game state with the REAL data
             self.game_state.frame = ticks_playing  # Use ticks as frame count
 
-            # Store the real data for get_game_info()
             self._real_game_data = {
                 "current_year": current_year,
                 "start_year": start_year,
@@ -1535,7 +1112,8 @@ class OpenTTDClient:
             logger.error(f"Raw packet data: {remaining_data.hex()}")
 
     def _handle_server_move(self, packet: Packet) -> None:
-        """Handle server move packet - client has been moved to a different company"""
+        """Handle server move packet
+        Client has been moved to a different company"""
         try:
             client_id = packet.read_uint8()
             company_id = packet.read_uint8()
@@ -1553,8 +1131,6 @@ class OpenTTDClient:
                 if company_id != CompanyID.COMPANY_SPECTATOR and self.pending_company_name:
                     logger.info(f"Successfully created and joined company {company_id}")
 
-                    # Try to set the company name (this might require a separate command)
-                    # For now, just clear the pending name
                     self.pending_company_name = None
 
                     self._emit_event("company_created", company_id)

@@ -325,17 +325,6 @@ class NetworkConnection:
         return Packet.from_bytes(packet_data)
 
 
-def tile_to_coordinate(tile: int) -> Tuple[int, int]:
-    """Convert tile index to X,Y coordinates"""
-    # OpenTTD uses a 1D tile index, convert to 2D coordinates
-    # Standard map sizes are powers of 2 (64, 128, 256, 512, etc.)
-    # For now assume 256x256 map, this should be determined from map data
-    map_size_x = 256
-    x = tile % map_size_x
-    y = tile // map_size_x
-    return (x, y)
-
-
 def coordinate_to_tile(x: int, y: int, map_size_x: int = 256) -> int:
     """Convert X,Y coordinates to tile index"""
     return y * map_size_x + x

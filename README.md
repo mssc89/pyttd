@@ -4,7 +4,7 @@
 [![Python versions](https://img.shields.io/pypi/pyversions/pyttd.svg)](https://pypi.org/project/pyttd/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A Python library for connecting to [OpenTTD](https://www.openttd.org/) servers as a client. Create AI bots, manage companies, and interact with OpenTTD games programmatically with **real-time data** and **without admin port access**.
+Finally, a Python client library for connecting to [OpenTTD](https://www.openttd.org/) servers **as a player**, and **parsing maps!**. Create AI bots, manage companies, and interact with OpenTTD games programmatically  **with real-time data** and **without admin port access**.
 
 ## Features
 
@@ -13,7 +13,7 @@ A Python library for connecting to [OpenTTD](https://www.openttd.org/) servers a
 | Multiplayer protocol            | ![Done](https://img.shields.io/badge/status-done-brightgreen)            |
 | Commands                        | ![Done](https://img.shields.io/badge/status-done-brightgreen)            |
 | Game state                      | ![Done](https://img.shields.io/badge/status-done-brightgreen)            |
-| Map data                        | ![In Progress](https://img.shields.io/badge/status-in%20progress-yellow) |
+| Save file parsing               | ![Done](https://img.shields.io/badge/status-done-brightgreen)            |
 | High level functions            | ![In Progress](https://img.shields.io/badge/status-in%20progress-yellow) |
 
 ## Installation
@@ -116,6 +116,12 @@ python examples/finance_bot.py
 ```
 Interactive financial management with chat-based commands.
 
+### Save File Parser
+```bash
+python examples/save_file_parser.py path/to/savefile.sav
+```
+Parse OpenTTD save files to extract game data including companies, map information, and economic data. All in a clean JSON file!
+
 ## API Reference
 
 ### OpenTTDClient
@@ -163,10 +169,35 @@ client = OpenTTDClient(
 - `client.send_chat_to_company(message, company_id)` - Company chat
 - `client.broadcast_status()` - Broadcast bot status
 
-#### Vehicle Management
-- `client.get_vehicles()` - List all vehicles
-- `client.get_our_vehicles()` - Our company's vehicles
-- `client.get_vehicle_statistics()` - Vehicle performance data
+#### Maps
+TODO: describe it here
+
+### Save File Parsing
+
+PyTTD includes a save file parser module that can extract detailed game data from OpenTTD save files.
+
+```python
+from pyttd import load_save_file
+
+# Parse a save file
+game_data = load_save_file("path/to/savefile.sav")
+
+# Access parsed data
+print(f"Save version: {game_data['meta']['save_version']}")
+print(f"Map size: {game_data['statistics']['map_size']}")
+print(f"Companies: {game_data['statistics']['companies_count']}")
+
+# Company information with financial data
+for company in game_data['companies']:
+    print(f"{company['name']}: £{company['money']:,} (AI: {company['is_ai']})")
+    
+# Game date and economy
+date = game_data['game']['date']['calendar_date']
+print(f"Game date: {date['year']}-{date['month']}-{date['day']}")
+
+economy = game_data['game']['economy']
+print(f"Interest rate: {economy['interest_rate']}%")
+```
 
 ## Requirements
 
@@ -194,23 +225,6 @@ flake8 pyttd/
 # Type checking
 mypy pyttd/
 ```
-
-## Protocol Implementation
-
-PyTTD implements OpenTTD's complete network protocol including:
-
-- **CLIENT_JOIN** and **CLIENT_GAME_INFO** packets for connection
-- **SERVER_GAME_INFO** parsing for real-time data synchronization  
-- **CLIENT_COMMAND** for all game operations (construction, management, etc.)
-- **SERVER_FRAME** handling for game synchronization
-- **CLIENT_CHAT** and **SERVER_CHAT** for communication
-
-The library automatically handles:
-- Map downloading and decompression
-- Game state synchronization  
-- Command validation and encoding
-- Network packet parsing and generation
-- Connection management and error handling
 
 ## Support
 

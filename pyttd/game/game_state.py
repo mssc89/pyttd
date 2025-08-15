@@ -1,6 +1,6 @@
 """Game State Management
 
-This module tracks the current state of the OpenTTD game including companies,
+This module tracks the current state of the game including companies,
 vehicles, economy, map information, and other game entities.
 """
 
