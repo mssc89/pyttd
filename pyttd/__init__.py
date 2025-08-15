@@ -33,7 +33,7 @@ from .game import (
 )
 from .saveload import SaveLoader, load_save_file
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 __author__ = "mssc89"
 __description__ = "Python OpenTTD Client Library"
 __url__ = "https://github.com/mssc89/pyttd"
