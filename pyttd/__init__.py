@@ -38,7 +38,7 @@ from .saveload import (
     export_savefile_to_string,
 )
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 __author__ = "mssc89"
 __description__ = "Python OpenTTD Client Library"
 __url__ = "https://github.com/mssc89/pyttd"

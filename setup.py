@@ -29,7 +29,7 @@ def get_version():
         for line in f:
             if line.startswith("__version__"):
                 return line.split("=")[1].strip().strip("\"'")
-    return "1.2.0"
+    return "1.3.0"
 
 
 setup(
