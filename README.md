@@ -4,15 +4,15 @@
 [![Python versions](https://img.shields.io/pypi/pyversions/pyttd.svg)](https://pypi.org/project/pyttd/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Finally, a Python client library for connecting to [OpenTTD](https://www.openttd.org/) servers **as a player** and **parsing maps!** Create AI bots, manage companies, and interact with OpenTTD games programmatically  **with real-time data** and **without admin port access**.
+Finally, a Python client library for connecting to [OpenTTD](https://www.openttd.org/) servers **as a player**, issuing **commands**, observing **game state** and **parsing maps**! Create bots, manage companies, and interact with OpenTTD games programmatically  **with real-time data** and **without admin port access**.
 
 ## Features
 
 | Feature                         | Status                                                                   | Remarks
 |---------------------------------|--------------------------------------------------------------------------|------------------------------------------
 | Multiplayer protocol            | ![Done](https://img.shields.io/badge/status-done-brightgreen)            | -                                       |
-| Commands                        | ![Done](https://img.shields.io/badge/status-done-brightgreen)            | Might have missed some                  |
-| Game state                      | ![Done](https://img.shields.io/badge/status-done-brightgreen)            | As far as possible without save parsing |
+| Commands                        | ![Done](https://img.shields.io/badge/status-done-brightgreen)            | Might have missed something             |
+| Game state                      | ![Done](https://img.shields.io/badge/status-done-brightgreen)            | Might have missed something             |
 | Save file parsing               | ![In Progress](https://img.shields.io/badge/status-in%20progress-yellow) | Game data and companies work            |
 | High level functions            | ![In Progress](https://img.shields.io/badge/status-in%20progress-yellow) | Helpers for common high-level tasks     |
 

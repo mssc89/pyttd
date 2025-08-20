@@ -1,270 +1,191 @@
 #!/usr/bin/env python3
 """
 OpenTTD Save File Parser Example
-===============================
 
-This example demonstrates how to utilize pyttd for extracting data from OpenTTD save files.
-
-Features:
-- Loading and decompressing .sav files
-- Company information
-- Game metadata
-- JSON output
+This example demonstrates how to utilize pyttd for extracting data from OpenTTD save files into JSON.
 
 Usage:
-    python examples/save_file_parser.py [path/to/savefile.sav] [--output-dir OUTPUT_DIR]
+    python examples/save_parser.py [path/to/savefile.sav]
 """
 
-import os
+import sys
 import json
-import argparse
 from pathlib import Path
+from functools import partial
 
-from pyttd import load_save_file
+try:
+    from tqdm import tqdm
+except Exception:
+    tqdm = None
 
+# Add the pyttd package to the path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-def parse_save_file_example(save_file_path: str, output_dir: str = ".", verbose: bool = False):
-    """
-    Parse a save file and optionally display the extracted data
-
-    Args:
-        save_file_path: Path to the save file
-        output_dir: Directory to save JSON output
-        verbose: Whether to print debug information
-    """
-    if verbose:
-        print(f"Parsing save file: {save_file_path}")
-        print()
-
-    try:
-        # Load and parse the save file
-        game_data = load_save_file(save_file_path, silent=not verbose)
-
-        if not game_data:
-            if verbose:
-                print("Failed to parse save file")
-            return False
-
-        if verbose:
-            print("Save file loaded successfully!")
-            print()
-
-            # Display metadata
-            display_metadata(game_data.get("meta", {}))
-
-            # Display game information
-            display_game_info(game_data.get("game", {}))
-
-            # Display map information
-            display_map_info(game_data.get("map", {}))
-
-            # Display company information
-            display_companies(game_data.get("companies", []))
-
-        # Save to JSON file for inspection
-        save_to_json(game_data, save_file_path, output_dir)
-
-        return True
-
-    except Exception as e:
-        if verbose:
-            print(f"Error parsing save file: {e}")
-        return False
-
-
-def display_metadata(meta: dict):
-    """Display save file metadata"""
-    print("METADATA")
-    print("-" * 40)
-    print(f"Filename: {meta.get('filename', 'Unknown')}")
-    print(f"Save Version: {meta.get('save_version', 'Unknown')}")
-    print(f"OpenTTD Version: {meta.get('openttd_version', 'Unknown')}")
-    print(f"Current Date: {meta.get('current_date', 'Unknown')}")
-    print(f"Current Year: {meta.get('current_year', 'Unknown')}")
-    print()
-
-
-def display_game_info(game: dict):
-    """Display game information"""
-    print("GAME")
-    print("-" * 40)
-
-    # Date
-    date_data = game.get("date", {})
-    if date_data:
-        print(f"Calendar Date: {date_data.get('date', 'Unknown')}")
-        print(f"Date Fraction: {date_data.get('date_fract', 'Unknown')}")
-        print(f"Tick Counter: {date_data.get('tick_counter', 'Unknown'):,}")
-        print(f"Economy Date: {date_data.get('economy_date', 'Unknown')}")
-
-    # Economy
-    economy_data = game.get("economy", {})
-    if economy_data:
-        print(f"Interest Rate: {economy_data.get('interest_rate', 'Unknown')}%")
-        print(f"Inflation Prices: {economy_data.get('inflation_prices', 'Unknown')}")
-        print(f"Inflation Payment: {economy_data.get('inflation_payment', 'Unknown')}")
-
-    # Settings
-    settings = game.get("settings", {})
-    if settings:
-        max_loan = settings.get("max_loan", "Unknown")
-        if isinstance(max_loan, (int, float)):
-            print(f"Max Loan: £{max_loan:,}")
-        else:
-            print(f"Max Loan: {max_loan}")
-
-    print()
-
-
-def display_map_info(map_data: dict):
-    """Display map information"""
-    print("MAP")
-    print("-" * 40)
-
-    width = map_data.get("dim_x", "Unknown")
-    height = map_data.get("dim_y", "Unknown")
-
-    print(f"Map Size: {width}x{height}")
-
-    if isinstance(width, int) and isinstance(height, int):
-        total_tiles = width * height
-        print(f"Total Tiles: {total_tiles:,}")
-
-    print()
-
-
-def display_companies(companies: list):
-    """Display company information"""
-    print("COMPANY")
-    print("-" * 40)
-
-    if not companies:
-        print("No companies found in save file")
-        print()
-        return
-
-    print(f"Total Companies: {len(companies)}")
-    print()
-
-    for company in companies:
-        display_single_company(company)
-
-
-def display_single_company(company: dict):
-    """Display information for a single company"""
-    company_id = company.get("id", "?")
-    name = company.get("name", "Unknown Company")
-    president = company.get("president_name", "Unknown")
-
-    print(f"Company {company_id}: {name}")
-    print(f"   President: {president}")
-    print(f"   Founded: {company.get('inaugurated_year', 'Unknown')}")
-    print(f"   Type: {'AI' if company.get('is_ai', False) else 'Human'}")
-
-    # Financials
-    money = company.get("money", 0)
-    loan = company.get("current_loan", 0)
-    max_loan = company.get("max_loan", 0)
-    net_worth = company.get("net_worth", 0)
-
-    print(f"   Money: £{money:,}")
-    print(f"   Current Loan: £{loan:,} / £{max_loan:,}")
-    print(f"   Net Worth: £{net_worth:,}")
-
-    # Colors
-    color = company.get("color", {})
-    if color:
-        print(f"   Color: {color.get('name', 'Unknown')} (#{color.get('index', '?')})")
-
-    # Locations
-    headquarters = company.get("headquarters")
-    if headquarters:
-        print(f"   Headquarters: ({headquarters.get('x', '?')}, {headquarters.get('y', '?')})")
-    else:
-        print(f"   Headquarters: None")
-
-    last_build = company.get("last_build", {})
-    print(f"   Last Build: ({last_build.get('x', '?')}, {last_build.get('y', '?')})")
-
-    # Expenses
-    expenses = company.get("expenses", {})
-    if expenses and "years" in expenses:
-        years_data = expenses["years"]
-        if years_data:
-            current_year_expenses = years_data[0]["expenses"]
-            total_expense = sum(v for v in current_year_expenses.values() if v > 0)
-            total_revenue = abs(sum(v for v in current_year_expenses.values() if v < 0))
-            profit = total_revenue - total_expense
-
-            print(f"   Current Year Expenses: £{total_expense:,}")
-            print(f"   Current Year Revenue: £{total_revenue:,}")
-            print(f"   Current Year Profit: £{profit:,}")
-
-    print()
-
-
-def save_to_json(data: dict, original_path: str, output_dir: str = "."):
-    """Save parsed data to JSON file"""
-    # Create output filename
-    input_path = Path(original_path)
-    output_dir_path = Path(output_dir)
-    output_dir_path.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir_path / f"{input_path.stem}.json"
-
-    try:
-        with open(output_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-
-        print(f"JSON saved to: {output_path}")
-
-    except Exception as e:
-        print(f"Failed to save JSON file: {e}")
+from pyttd.saveload import (
+    load_savefile,
+    SaveFileExporter,
+    export_savefile_to_json,
+    export_savefile_to_string,
+)
 
 
 def main():
-    """Main entry point"""
-    parser = argparse.ArgumentParser(
-        description="Parse OpenTTD save files and extract game data to JSON",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
+    """Main function"""
 
-    parser.add_argument("save_file", nargs="?", help="Path to OpenTTD save file (.sav)")
+    if len(sys.argv) < 2:
+        print("Usage: python save_parser.py <savefile_path>")
+        return
 
-    parser.add_argument(
-        "--output-dir",
-        "-o",
-        default=".",
-        help="Output directory for JSON file (default: current directory)",
-    )
+    savefile_path = sys.argv[1]
 
-    parser.add_argument("--verbose", "-v", action="store_true", help="Print debug information")
+    if not Path(savefile_path).exists():
+        print(f"Error: Savefile not found: {savefile_path}")
+        return
 
-    args = parser.parse_args()
+    print(f"Loading savefile: {savefile_path}")
+    print()
 
-    # Get save file path from args
-    if args.save_file:
-        save_file_path = args.save_file
-    else:
-        print("No save file specified.")
-        print("Usage: python save_file_parser.py [path/to/savefile.sav] [--output-dir OUTPUT_DIR]")
-        return 1
+    # Example 1: Basic savefile loading
+    print("1. Basic Savefile Loading")
+    print("-" * 30)
 
-    # Check if file exists
-    if not os.path.exists(save_file_path):
-        print(f"Save file not found: {save_file_path}")
-        return 1
+    try:
+        # Helper to make progress bars
+        def make_progress(desc: str):
+            bar = tqdm(total=100, unit="%", desc=desc) if tqdm else None
 
-    # Parse the save file
-    success = parse_save_file_example(save_file_path, args.output_dir, args.verbose)
+            def cb(p: float, stage: str):
+                if bar is not None:
+                    newn = int(max(0, min(100, p * 100)))
+                    if newn >= bar.n:
+                        bar.n = newn
+                        bar.set_postfix_str(stage)
+                        bar.refresh()
 
-    if args.verbose:
-        if success:
-            print("Save file parsing completed successfully!")
-        else:
-            print("Save file parsing failed!")
+            return bar, cb
 
-    return 0 if success else 1
+        # Load with parsed data (human-readable)
+        pbar, _progress = make_progress("Parsing (parsed)")
+        parsed_data = load_savefile_comprehensive(
+            savefile_path, silent=True, parsed=True, progress_callback=_progress
+        )
+        print(f"Loaded parsed data")
+        print(
+            f"  - Save version: {parsed_data.meta.save_version if hasattr(parsed_data, 'meta') else 'Unknown'}"
+        )
+        print(
+            f"  - Companies: {parsed_data.companies.count if hasattr(parsed_data, 'companies') else 0}"
+        )
+        print(
+            f"  - Map size: {parsed_data.map.dim_x if hasattr(parsed_data, 'map') else 0}x{parsed_data.map.dim_y if hasattr(parsed_data, 'map') else 0}"
+        )
+
+        # Load with raw data
+        if pbar is not None:
+            pbar.close()
+        pbar2, _progress2 = make_progress("Parsing (raw)")
+        raw_data = load_savefile_comprehensive(
+            savefile_path, silent=True, parsed=False, progress_callback=_progress2
+        )
+        if pbar2 is not None:
+            pbar2.close()
+        print(f"Loaded raw data")
+        print(
+            f"  - Raw chunks: {list(raw_data.keys()) if isinstance(raw_data, dict) else 'structured_data'}"
+        )
+
+    except Exception as e:
+        print(f"Error loading savefile: {e}")
+        return
+
+    print()
+
+    # Example 2: JSON Export
+    print("2. JSON Export")
+    print("-" * 15)
+
+    try:
+        pbar4, _progress4 = make_progress("Export (string)")
+        json_string = export_savefile_to_string(
+            parsed_data, parsed=True, include_raw=False, pretty=True, progress_callback=_progress4
+        )
+        if pbar4 is not None:
+            pbar4.close()
+        print(f"Exported to JSON string")
+        print(f"  - JSON length: {len(json_string):,} characters")
+
+        # Export to file (parsed data)
+        output_file = Path(savefile_path).with_suffix(".json")
+        pbar5, _progress5 = make_progress("Export (parsed file)")
+        export_savefile_to_json(
+            parsed_data,
+            output_file,
+            parsed=True,
+            include_raw=False,
+            pretty=True,
+            progress_callback=_progress5,
+        )
+        if pbar5 is not None:
+            pbar5.close()
+        print(f"Exported to file: {output_file}")
+
+        # Export raw data to file
+        raw_output_file = Path(savefile_path).with_suffix(".raw.json")
+        pbar6, _progress6 = make_progress("Export (raw file)")
+        export_savefile_to_json(
+            raw_data,
+            raw_output_file,
+            parsed=False,
+            include_raw=True,
+            pretty=True,
+            progress_callback=_progress6,
+        )
+        if pbar6 is not None:
+            pbar6.close()
+        print(f"Exported raw data to: {raw_output_file}")
+
+    except Exception as e:
+        print(f"Error exporting to JSON: {e}")
+
+    print()
+
+    # Example 3: Game data
+    print("3. Game data")
+    print("-" * 18)
+
+    try:
+        companies = parsed_data.companies.companies
+        if companies:
+            print(f"Companies:")
+            print(f"  - Total companies: {len(companies)}")
+
+            richest_company = max(companies, key=lambda c: c.get("money", 0))
+            print(f"  - Richest company: {richest_company.get('name', 'Unknown')}")
+            print(f"    Money: ${richest_company.get('money', 0):,}")
+
+            ai_companies = sum(1 for c in companies if c.get("is_ai", False))
+            human_companies = len(companies) - ai_companies
+            print(f"  - AI companies: {ai_companies}")
+            print(f"  - Human companies: {human_companies}")
+
+        game_data = parsed_data.game
+        if game_data:
+            print(f"Game State:")
+            print(f"  - Current date: {game_data.date.formatted}")
+            print(f"  - Economy date: {game_data.economy_date.formatted}")
+            print(f"  - Price inflation: {game_data.inflation_prices.formatted}")
+            print(f"  - Payment inflation: {game_data.inflation_payment.formatted}")
+            print(f"  - Interest rate: {game_data.interest_rate}%")
+            print(f"  - Max loan: ${game_data.max_loan:,}")
+
+    except Exception as e:
+        print(f"Error: {e}")
+
+    print()
+    print("\nGenerated files:")
+    print(f"  - {Path(savefile_path).with_suffix('.json')} (parsed data)")
+    print(f"  - {Path(savefile_path).with_suffix('.raw.json')} (raw data)")
 
 
 if __name__ == "__main__":
-    exit(main())
+    main()

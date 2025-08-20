@@ -1,7 +1,5 @@
 """
 Company Name Generation
-
-Implements OpenTTD's company name generation algorithms.
 """
 
 # String constants - from strings_type.h
@@ -51,71 +49,56 @@ _surname_list = [
     "Adams",
     "Allan",
     "Baker",
-    "Biggar",
+    "Bigwig",
     "Black",
-    "Blair",
+    "Bloggs",
     "Brown",
     "Campbell",
-    "Clark",
-    "Clarke",
-    "Collins",
-    "Cook",
-    "Cooper",
-    "Davies",
-    "Davis",
-    "Donald",
-    "Duncan",
-    "Evans",
-    "Ferguson",
-    "Fraser",
-    "Gibson",
-    "Graham",
-    "Grant",
-    "Gray",
-    "Green",
-    "Grierson",
+    "Gordon",
     "Hamilton",
-    "Harris",
-    "Henderson",
-    "Hill",
-    "Jackson",
-    "James",
-    "Johnson",
-    "Johnston",
+    "Hawthorn",
+    "Higgins",
+    "Green",
+    "Gribble",
     "Jones",
-    "Kelly",
-    "Kennedy",
-    "Lewis",
-    "MacBeth",
+    "McAlpine",
     "MacDonald",
-    "MacLeod",
-    "Martin",
-    "Miller",
-    "Mitchell",
-    "Moore",
-    "Morrison",
+    "McIntosh",
     "Muir",
-    "Murray",
-    "Palmer",
+    "Murphy",
+    "Nelson",
+    "O'Donnell",
     "Parker",
-    "Paterson",
-    "Robertson",
-    "Ross",
-    "Scott",
-    "Simpson",
-    "Smith",
-    "Stewart",
-    "Taylor",
+    "Phillips",
+    "Pilkington",
+    "Quigley",
+    "Sharkey",
     "Thomson",
-    "Walker",
-    "Watson",
-    "White",
-    "Wilson",
-    "Wood",
-    "Young",
+    "Watkins",
 ]
 
-_initial_name_letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+_initial_name_letters = [
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "F",
+    "G",
+    "H",
+    "I",
+    "J",
+    "K",
+    "L",
+    "M",
+    "N",
+    "P",
+    "R",
+    "S",
+    "T",
+    "W",
+]
 
 # Color names - from company_base.h and table/palettes.h
 _company_colors = [
@@ -159,12 +142,12 @@ def generate_company_name(name_1: int, name_2: int) -> str:
 
 def generate_president_name(seed: int) -> str:
     """Generate president name from seed"""
-    # Generate initial (first letter)
-    initial_index = (seed & 0xFF) * len(_initial_name_letters) >> 8
+    # Generate initial (first letter) - GB(x, 0, 8)
+    initial_index = (len(_initial_name_letters) * ((seed >> 0) & 0xFF)) >> 8
     initial = _initial_name_letters[initial_index]
 
-    # Generate surname
-    surname_index = ((seed >> 8) & 0xFF) * len(_surname_list) >> 8
+    # Generate surname - GB(x, 16, 8)
+    surname_index = (len(_surname_list) * ((seed >> 16) & 0xFF)) >> 8
     surname = _surname_list[surname_index]
 
     return f"{initial}. {surname}"
@@ -172,8 +155,8 @@ def generate_president_name(seed: int) -> str:
 
 def generate_andco_name(seed: int) -> str:
     """Generate 'Foobar & Co' company name"""
-    # Use first surname for base name
-    surname_index = (seed & 0xFF) * len(_surname_list) >> 8
+    # Use surname from bits 16-23 - GB(arg, 16, 8)
+    surname_index = (len(_surname_list) * ((seed >> 16) & 0xFF)) >> 8
     surname = _surname_list[surname_index]
     return f"{surname} & Co."
 

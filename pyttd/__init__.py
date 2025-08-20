@@ -31,9 +31,14 @@ from .game import (
     CommandPacket,
     CompanyID,
 )
-from .saveload import SaveLoader, load_save_file
+from .saveload import (
+    load_savefile,
+    SaveFileExporter,
+    export_savefile_to_json,
+    export_savefile_to_string,
+)
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 __author__ = "mssc89"
 __description__ = "Python OpenTTD Client Library"
 __url__ = "https://github.com/mssc89/pyttd"
@@ -51,6 +56,8 @@ __all__ = [
     "CommandBuilder",
     "CommandPacket",
     "CompanyID",
-    "SaveLoader",
-    "load_save_file",
+    "load_savefile",
+    "SaveFileExporter",
+    "export_savefile_to_json",
+    "export_savefile_to_string",
 ]

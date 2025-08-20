@@ -21,7 +21,6 @@ from .network.protocol import (
 )
 from .game.game_state import GameState, CompanyID, CompanyInfo, VehicleInfo, ClientInfo, VehicleType
 from .game.commands import CommandPacket, CommandBuilder, Commands, DoCommandFlag, RailType
-from .saveload.save_parser import SaveLoader
 
 
 logger = logging.getLogger(__name__)
