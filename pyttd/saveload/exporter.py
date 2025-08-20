@@ -72,12 +72,8 @@ class SaveJSONEncoder(json.JSONEncoder):
 
         # Handle bytes objects
         if isinstance(obj, bytes):
-            return {
-                "type": "bytes",
-                "length": len(obj),
-                "hex": obj.hex(),
-                "base64": obj.hex(),  # Using hex for now, could use base64
-            }
+            # Avoid dumping massive binary - flatbuffer is used for that
+            return {"type": "bytes", "length": len(obj)}
 
         # Handle sets
         if isinstance(obj, set):

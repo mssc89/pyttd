@@ -11,6 +11,7 @@ import hashlib
 import logging
 from typing import Optional, Callable, Dict, Any, List, Tuple, Union
 from enum import Enum
+import struct
 
 from .network.protocol import (
     NetworkConnection,
@@ -21,6 +22,7 @@ from .network.protocol import (
 )
 from .game.game_state import GameState, CompanyID, CompanyInfo, VehicleInfo, ClientInfo, VehicleType
 from .game.commands import CommandPacket, CommandBuilder, Commands, DoCommandFlag, RailType
+from .saveload import load_savefile_from_bytes, SaveFileData
 
 
 logger = logging.getLogger(__name__)
@@ -96,6 +98,54 @@ class OpenTTDClient:
         self.client_revision = "14.1"  # Should match OpenTTD version
         self.language_id = 0  # English
 
+        # Vehicle tracking state
+        self._vehicles: Dict[int, Dict[str, Any]] = {}  # vehicle_id -> vehicle_data
+        self._vehicle_commands = {
+            0x0D: "BUILD_VEHICLE",  # CMD_BUILD_VEHICLE
+            0x0E: "SELL_VEHICLE",  # CMD_SELL_VEHICLE
+            0x0F: "START_STOP_VEHICLE",  # CMD_START_STOP_VEHICLE
+            0x10: "MASS_START_STOP",  # CMD_MASS_START_STOP
+            0x11: "AUTOREPLACE_VEHICLE",  # CMD_AUTOREPLACE_VEHICLE
+            0x12: "DEPOT_SELL_ALL_VEHICLES",  # CMD_DEPOT_SELL_ALL_VEHICLES
+            0x13: "DEPOT_MASS_AUTOREPLACE",  # CMD_DEPOT_MASS_AUTOREPLACE
+            0x14: "CREATE_GROUP",  # CMD_CREATE_GROUP
+            0x15: "DELETE_GROUP",  # CMD_DELETE_GROUP
+            0x16: "ADD_VEHICLE_GROUP",  # CMD_ADD_VEHICLE_GROUP
+            0x17: "ADD_SHARED_VEHICLE_GROUP",  # CMD_ADD_SHARED_VEHICLE_GROUP
+            0x18: "REMOVE_ALL_VEHICLES_GROUP",  # CMD_REMOVE_ALL_VEHICLES_GROUP
+            0x19: "SET_GROUP_REPLACE_PROTECTION",  # CMD_SET_GROUP_REPLACE_PROTECTION
+            0x1A: "MOVE_VEHICLE",  # CMD_MOVE_VEHICLE
+            0x1B: "MOVE_VEHICLE_HEAD",  # CMD_MOVE_VEHICLE_HEAD
+            0x1C: "CLONE_VEHICLE",  # CMD_CLONE_VEHICLE
+            0x1D: "CLONE_VEHICLE_HEAD",  # CMD_CLONE_VEHICLE_HEAD
+            0x1E: "TURN_VEHICLE",  # CMD_TURN_VEHICLE
+            0x1F: "SELL_VEHICLE_HEAD",  # CMD_SELL_VEHICLE_HEAD
+            0x20: "SELL_VEHICLE_WAGONS",  # CMD_SELL_VEHICLE_WAGONS
+            0x21: "SEND_VEHICLE_TO_DEPOT",  # CMD_SEND_VEHICLE_TO_DEPOT
+            0x22: "CHANGE_SERVICE_INT",  # CMD_CHANGE_SERVICE_INT
+            0x23: "RENAME_VEHICLE",  # CMD_RENAME_VEHICLE
+            0x24: "RENAME_VEHICLE_GROUP",  # CMD_RENAME_VEHICLE_GROUP
+            0x25: "SET_VEHICLE_GROUPID",  # CMD_SET_VEHICLE_GROUPID
+            0x26: "SET_VEHICLE_GROUPID_SHARED",  # CMD_SET_VEHICLE_GROUPID_SHARED
+            0x27: "SET_VEHICLE_GROUPID_DEFAULT",  # CMD_SET_VEHICLE_GROUPID_DEFAULT
+            0x28: "SET_VEHICLE_GROUPID_ALL_SHARED",  # CMD_SET_VEHICLE_GROUPID_ALL_SHARED
+            0x29: "SET_VEHICLE_GROUPID_ALL_DEFAULT",  # CMD_SET_VEHICLE_GROUPID_ALL_DEFAULT
+            0x2A: "SET_VEHICLE_GROUPID_ALL_PROTECTED",  # CMD_SET_VEHICLE_GROUPID_ALL_PROTECTED
+            0x2B: "SET_VEHICLE_GROUPID_ALL_UNPROTECTED",  # CMD_SET_VEHICLE_GROUPID_ALL_UNPROTECTED
+            0x2C: "SET_VEHICLE_GROUPID_ALL_SHARED_PROTECTED",  # CMD_SET_VEHICLE_GROUPID_ALL_SHARED_PROTECTED
+            0x2D: "SET_VEHICLE_GROUPID_ALL_SHARED_UNPROTECTED",  # CMD_SET_VEHICLE_GROUPID_ALL_SHARED_UNPROTECTED
+            0x2E: "SET_VEHICLE_GROUPID_ALL_DEFAULT_PROTECTED",  # CMD_SET_VEHICLE_GROUPID_ALL_DEFAULT_PROTECTED
+            0x2F: "SET_VEHICLE_GROUPID_ALL_DEFAULT_UNPROTECTED",  # CMD_SET_VEHICLE_GROUPID_ALL_DEFAULT_UNPROTECTED
+            0x30: "SET_VEHICLE_GROUPID_ALL_SHARED_DEFAULT_PROTECTED",  # CMD_SET_VEHICLE_GROUPID_ALL_SHARED_DEFAULT_PROTECTED
+            0x31: "SET_VEHICLE_GROUPID_ALL_SHARED_DEFAULT_UNPROTECTED",  # CMD_SET_VEHICLE_GROUPID_ALL_SHARED_DEFAULT_UNPROTECTED
+            0x32: "SET_VEHICLE_GROUPID_ALL_SHARED_DEFAULT_PROTECTED_SHARED",  # CMD_SET_VEHICLE_GROUPID_ALL_SHARED_DEFAULT_PROTECTED_SHARED
+            0x33: "SET_VEHICLE_GROUPID_ALL_SHARED_DEFAULT_UNPROTECTED_SHARED",  # CMD_SET_VEHICLE_GROUPID_ALL_SHARED_DEFAULT_UNPROTECTED_SHARED
+            0x34: "SET_VEHICLE_GROUPID_ALL_SHARED_DEFAULT_PROTECTED_DEFAULT",  # CMD_SET_VEHICLE_GROUPID_ALL_SHARED_DEFAULT_PROTECTED_DEFAULT
+            0x35: "SET_VEHICLE_GROUPID_ALL_SHARED_DEFAULT_UNPROTECTED_DEFAULT",  # CMD_SET_VEHICLE_GROUPID_ALL_SHARED_DEFAULT_UNPROTECTED_DEFAULT
+            0x36: "SET_VEHICLE_GROUPID_ALL_SHARED_DEFAULT_PROTECTED_SHARED_DEFAULT",  # CMD_SET_VEHICLE_GROUPID_ALL_SHARED_DEFAULT_PROTECTED_SHARED_DEFAULT
+            0x37: "SET_VEHICLE_GROUPID_ALL_SHARED_DEFAULT_UNPROTECTED_SHARED_DEFAULT",  # CMD_SET_VEHICLE_GROUPID_ALL_SHARED_DEFAULT_UNPROTECTED_SHARED_DEFAULT
+        }
+
         # Connection state
         self._running = False
         self._network_thread: Optional[threading.Thread] = None
@@ -109,6 +159,8 @@ class OpenTTDClient:
         # Map synchronization
         self._map_buffer = bytearray()
         self._expected_map_size = 0
+        self._parsed_save: Optional[SaveFileData] = None
+        self._map_parse_thread: Optional[threading.Thread] = None
 
         # Command queue
         self._command_queue: List[CommandPacket] = []
@@ -119,12 +171,18 @@ class OpenTTDClient:
             "connected": [],
             "disconnected": [],
             "map_complete": [],
+            "map_parse_progress": [],
+            "map_parsed": [],
             "game_joined": [],
             "command_result": [],
             "chat_message": [],
+            "server_command": [],
+            "frame": [],
+            "server_action": [],
             "desync": [],
             "error": [],
             "company_created": [],
+            "vehicle_action": [],
         }
 
     def on(self, event: str, callback: Callable) -> None:
@@ -293,10 +351,21 @@ class OpenTTDClient:
 
     def get_map_info(self) -> Dict[str, Any]:
         """Get map information"""
-        return {
+        info: Dict[str, Any] = {
             "size_x": self.game_state.map_info.size_x,
             "size_y": self.game_state.map_info.size_y,
         }
+        if self._parsed_save and getattr(self._parsed_save, "map", None):
+            try:
+                info["size_x"] = getattr(self._parsed_save.map, "dim_x", info["size_x"])
+                info["size_y"] = getattr(self._parsed_save.map, "dim_y", info["size_y"])
+            except Exception:
+                pass
+        return info
+
+    def get_parsed_save(self) -> Optional[SaveFileData]:
+        """Return the parsed save structure after map download completes, if available."""
+        return self._parsed_save
 
     def send_command(self, command: CommandPacket) -> bool:
         """
@@ -787,7 +856,8 @@ class OpenTTDClient:
         client_info = ClientInfo(client_id=client_id, company_id=company_id, name=client_name)
         self.game_state.add_client(client_info)
 
-        logger.debug(f"Client info: {client_name} (ID: {client_id}, Company: {company_id})")
+        logger.info(f"Client info: {client_name} (ID: {client_id}, Company: {company_id})")
+        # When company switches happen, follow-up SERVER_MOVE updates company mapping
 
     def _handle_server_wait(self, packet: Packet) -> None:
         """Handle wait packet - other clients downloading map"""
@@ -826,19 +896,66 @@ class OpenTTDClient:
         map_data = bytes(self._map_buffer)
         self.game_state.set_map_data(map_data)
 
+        # Immediately ACK to avoid server timeout
         try:
-            logger.info("Parsing map data...")
-            # TODO: add parser call here
-
+            ack = Packet(PacketType.CLIENT_MAP_OK)
+            self.connection.send_packet(ack)
         except Exception as e:
-            logger.error(f"Error parsing map data: {e}")
-            # self._parsed_map_data = {}
+            logger.error(f"Failed to send CLIENT_MAP_OK: {e}")
 
-        # Send acknowledgment
-        packet = Packet(PacketType.CLIENT_MAP_OK)
-        self.connection.send_packet(packet)
-
+        # Notify that map transfer is done
         self._emit_event("map_complete")
+
+        # Parse in background to avoid blocking join
+        def _bg_parse() -> None:
+            try:
+                logger.info("Parsing map data (background)...")
+
+                # Relay progress to listeners
+                def _progress_cb(p: float, stage: str) -> None:
+                    try:
+                        self._emit_event("map_parse_progress", p, stage)
+                    except Exception:
+                        pass
+
+                parsed = load_savefile_from_bytes(
+                    map_data, parsed=True, silent=True, progress_callback=_progress_cb
+                )
+                self._parsed_save = parsed  # type: ignore[assignment]
+                if parsed and hasattr(parsed, "map") and parsed.map:
+                    mx = getattr(parsed.map, "dim_x", 0)
+                    my = getattr(parsed.map, "dim_y", 0)
+                    if mx:
+                        self.game_state.map_info.size_x = mx
+                    if my:
+                        self.game_state.map_info.size_y = my
+                    logger.info(
+                        f"Parsed map: {self.game_state.map_info.size_x}x{self.game_state.map_info.size_y}"
+                    )
+                # Populate company names from parsed save if available
+                try:
+                    if parsed and hasattr(parsed, "companies"):
+                        comp_list = getattr(parsed.companies, "companies", [])
+                        for comp in comp_list:
+                            try:
+                                cid = int(comp.get("id", -1))
+                                name = str(comp.get("name", f"Company {cid}"))
+                                if 0 <= cid <= 14:
+                                    info = CompanyInfo(company_id=CompanyID(cid), name=name)
+                                    self.game_state.add_company(info)
+                            except Exception:
+                                continue
+                except Exception:
+                    pass
+                self._emit_event("map_parsed")
+            except Exception as e:
+                logger.error(f"Error parsing map data: {e}")
+
+        try:
+            self._map_parse_thread = threading.Thread(target=_bg_parse, daemon=True)
+            self._map_parse_thread.start()
+        except Exception as e:
+            logger.error(f"Failed to start background parsing: {e}")
 
     def _handle_server_join(self, packet: Packet) -> None:
         """Handle successful join"""
@@ -895,6 +1012,12 @@ class OpenTTDClient:
 
             self.game_state.update_frame(frame, frame_max, seed1, seed2)
 
+            # Emit frame event for listeners
+            try:
+                self._emit_event("frame", frame, frame_max)
+            except Exception:
+                pass
+
             # Send acknowledgment (only if frame has advanced and we're fully active)
             if frame > self._last_ack_frame and self.status == ClientStatus.ACTIVE:
                 current_time = time.time()
@@ -931,19 +1054,417 @@ class OpenTTDClient:
             logger.error(f"Sync packet too short: {e}")
 
     def _handle_server_command(self, packet: Packet) -> None:
-        """Handle command execution packet"""
-        company = packet.read_uint8()
-        command_id_raw = packet.read_uint32()
+        """Handle SERVER_COMMAND packets"""
         try:
-            command_id: Union[Commands, int] = Commands(command_id_raw)
-        except ValueError:
-            logger.debug(f"Unknown command ID {command_id_raw}, continuing...")
-            command_id = command_id_raw
-        # Command parameters would be decoded here based on command type
-        callback_id = packet.read_uint8()
-        frame = packet.read_uint32()
+            # Error message
+            err_msg = packet.read_uint8()
+            # Data length
+            data_len = packet.read_uint16()
+            # Command data
+            params_bytes = packet.read_bytes(data_len)
+            # Callback index
+            callback_id = packet.read_uint8()
+            # Frame
+            frame = packet.read_uint32()
+            # Optional my_cmd byte may remain; ignore
+        except Exception as e:
+            logger.debug(f"Error parsing SERVER_COMMAND packet: {e}")
+            return
 
-        logger.debug(f"Received command: {command_id} for company {company} at frame {frame}")
+        try:
+            # Extract command ID from first byte of params
+            if not params_bytes:
+                return
+            command_id = params_bytes[0]
+
+            # Check if this is a vehicle-related command
+            if command_id in self._vehicle_commands:
+                company = self._get_company_from_command(params_bytes)
+                self._handle_vehicle_command(company, command_id, params_bytes[1:], frame)
+
+        except Exception as e:
+            logger.debug(f"Error handling SERVER_COMMAND: {e}")
+
+    def _decode_command_params(self, cmd: Union[Commands, int], params: bytes) -> Dict[str, Any]:
+        """Decode parameter buffer to p1/p2/tile where possible."""
+        result: Dict[str, Any] = {}
+        if not params:
+            return result
+        try:
+            if not isinstance(cmd, Commands):
+                cmd = Commands(cmd)
+        except Exception:
+            cmd = None  # type: ignore[assignment]
+
+        import struct as _struct
+
+        # Common case: two uint32 parameters
+        if len(params) >= 8:
+            p1, p2 = _struct.unpack_from("<LL", params, 0)
+            result["p1"] = p1
+            result["p2"] = p2
+
+        # Heuristics per command
+        if cmd in (
+            Commands.BUILD_SINGLE_RAIL,
+            Commands.LANDSCAPE_CLEAR,
+            Commands.BUILD_RAIL_STATION,
+            Commands.BUILD_TRAIN_DEPOT,
+            Commands.BUILD_ROAD_STOP,
+            Commands.BUILD_ROAD_DEPOT,
+            Commands.BUILD_DOCK,
+            Commands.BUILD_SHIP_DEPOT,
+            Commands.BUILD_BUOY,
+            Commands.PLACE_SIGN,
+            Commands.BUILD_VEHICLE,
+        ):
+            # First param often encodes tile or depot tile
+            if "p1" in result and isinstance(result["p1"], int):
+                result["tile"] = int(result["p1"]) if cmd != Commands.BUILD_VEHICLE else None
+        elif cmd in (Commands.BUILD_RAILROAD_TRACK, Commands.BUILD_LONG_ROAD, Commands.BUILD_ROAD):
+            # p1=start tile, p2=end or flags
+            if "p1" in result:
+                result["tile"] = int(result["p1"])  # highlight start tile
+
+        return result
+
+    def _decode_vehicle_command(self, cmd: int, params_bytes: bytes) -> Dict[str, Any]:
+        """Decode vehicle-related command parameters."""
+        result: Dict[str, Any] = {}
+
+        if not params_bytes:
+            return result
+
+        try:
+            if cmd == 0x0D:  # BUILD_VEHICLE
+                # p1: engine_id, p2: flags
+                if len(params_bytes) >= 8:
+                    engine_id, flags = struct.unpack_from("<LL", params_bytes, 0)
+                    result["engine_id"] = engine_id
+                    result["flags"] = flags
+                    result["action"] = "build_vehicle"
+
+            elif cmd == 0x0E:  # SELL_VEHICLE
+                # p1: vehicle_id, p2: flags
+                if len(params_bytes) >= 8:
+                    vehicle_id, flags = struct.unpack_from("<LL", params_bytes, 0)
+                    result["vehicle_id"] = vehicle_id
+                    result["flags"] = flags
+                    result["action"] = "sell_vehicle"
+
+            elif cmd == 0x0F:  # START_STOP_VEHICLE
+                # p1: vehicle_id, p2: flags
+                if len(params_bytes) >= 8:
+                    vehicle_id, flags = struct.unpack_from("<LL", params_bytes, 0)
+                    result["vehicle_id"] = vehicle_id
+                    result["flags"] = flags
+                    result["action"] = "start_stop_vehicle"
+
+            elif cmd == 0x1A:  # MOVE_VEHICLE
+                # p1: vehicle_id, p2: flags
+                if len(params_bytes) >= 8:
+                    vehicle_id, flags = struct.unpack_from("<LL", params_bytes, 0)
+                    result["vehicle_id"] = vehicle_id
+                    result["flags"] = flags
+                    result["action"] = "move_vehicle"
+
+            elif cmd == 0x1C:  # CLONE_VEHICLE
+                # p1: vehicle_id, p2: flags
+                if len(params_bytes) >= 8:
+                    vehicle_id, flags = struct.unpack_from("<LL", params_bytes, 0)
+                    result["vehicle_id"] = vehicle_id
+                    result["flags"] = flags
+                    result["action"] = "clone_vehicle"
+
+        except Exception as e:
+            logger.debug(f"Error decoding vehicle command {cmd}: {e}")
+
+        return result
+
+    def _parse_vehicles_from_save(self, parsed_save: Any) -> None:
+        """Parse vehicle data from the savefile."""
+        if not parsed_save or not hasattr(parsed_save, "vehicles"):
+            return
+
+        try:
+            vehicles_data = getattr(parsed_save.vehicles, "vehicles", [])
+            for vehicle in vehicles_data:
+                vehicle_id = vehicle.get("id")
+                if vehicle_id is not None:
+                    self._vehicles[vehicle_id] = {
+                        "id": vehicle_id,
+                        "type": vehicle.get("type", "unknown"),
+                        "owner": vehicle.get("owner", 0),
+                        "engine_type": vehicle.get("engine_type", 0),
+                        "x": vehicle.get("x", 0),
+                        "y": vehicle.get("y", 0),
+                        "z": vehicle.get("z", 0),
+                        "direction": vehicle.get("direction", 0),
+                        "speed": vehicle.get("speed", 0),
+                        "cargo_type": vehicle.get("cargo_type", 0),
+                        "cargo_capacity": vehicle.get("cargo_capacity", 0),
+                        "cargo_count": vehicle.get("cargo_count", 0),
+                        "name": vehicle.get("name", f"Vehicle {vehicle_id}"),
+                        "profit_this_year": vehicle.get("profit_this_year", 0),
+                        "profit_last_year": vehicle.get("profit_last_year", 0),
+                        "value": vehicle.get("value", 0),
+                        "age": vehicle.get("age", 0),
+                        "reliability": vehicle.get("reliability", 0),
+                        "last_station_visited": vehicle.get("last_station_visited", 0),
+                        "current_order": vehicle.get("current_order", {}),
+                        "orders": vehicle.get("orders", []),
+                    }
+            logger.info(f"Parsed {len(self._vehicles)} vehicles from savefile")
+        except Exception as e:
+            logger.error(f"Error parsing vehicles from savefile: {e}")
+
+    def _handle_vehicle_command(
+        self, company: int, cmd: int, params_bytes: bytes, frame: int
+    ) -> None:
+        """Handle vehicle-related commands and update vehicle state."""
+        vehicle_data = self._decode_vehicle_command(cmd, params_bytes)
+
+        if not vehicle_data:
+            return
+
+        action = {
+            "type": "vehicle_action",
+            "company": company,
+            "command": cmd,
+            "command_name": self._vehicle_commands.get(cmd, f"Unknown({cmd})"),
+            "frame": frame,
+            "vehicle_data": vehicle_data,
+        }
+
+        # Update vehicle state based on command
+        if vehicle_data.get("action") == "build_vehicle":
+            # Vehicle will be created - we'll need to track it
+            logger.info(
+                f"Vehicle construction: company={company} building vehicle with engine={vehicle_data.get('engine_id')}"
+            )
+
+        elif vehicle_data.get("action") == "sell_vehicle":
+            vehicle_id = vehicle_data.get("vehicle_id")
+            if vehicle_id in self._vehicles:
+                del self._vehicles[vehicle_id]
+                logger.info(f"Vehicle sold: company={company} sold vehicle {vehicle_id}")
+
+        elif vehicle_data.get("action") == "start_stop_vehicle":
+            vehicle_id = vehicle_data.get("vehicle_id")
+            if vehicle_id in self._vehicles:
+                # Update vehicle status
+                self._vehicles[vehicle_id]["status"] = (
+                    "stopped" if vehicle_data.get("flags", 0) & 1 else "running"
+                )
+                logger.info(
+                    f"Vehicle status change: company={company} vehicle {vehicle_id} {'stopped' if vehicle_data.get('flags', 0) & 1 else 'started'}"
+                )
+
+        elif vehicle_data.get("action") == "move_vehicle":
+            vehicle_id = vehicle_data.get("vehicle_id")
+            if vehicle_id in self._vehicles:
+                logger.info(f"Vehicle moved: company={company} moved vehicle {vehicle_id}")
+
+        elif vehicle_data.get("action") == "clone_vehicle":
+            vehicle_id = vehicle_data.get("vehicle_id")
+            if vehicle_id in self._vehicles:
+                logger.info(f"Vehicle cloned: company={company} cloned vehicle {vehicle_id}")
+
+        self._emit_event("vehicle_action", action)
+
+    def get_vehicles(self) -> Dict[int, Dict[str, Any]]:
+        """Get all tracked vehicles."""
+        return self._vehicles.copy()
+
+    def get_vehicles_by_company(self, company_id: int) -> Dict[int, Dict[str, Any]]:
+        """Get vehicles owned by a specific company."""
+        return {
+            vid: vdata for vid, vdata in self._vehicles.items() if vdata.get("owner") == company_id
+        }
+
+    def get_vehicles_by_type(self, vehicle_type: str) -> Dict[int, Dict[str, Any]]:
+        """Get vehicles of a specific type."""
+        return {
+            vid: vdata for vid, vdata in self._vehicles.items() if vdata.get("type") == vehicle_type
+        }
+
+    def _describe_command(self, cmd: Union[Commands, int]) -> str:
+        """Return a human-readable description for a command ID."""
+        try:
+            if not isinstance(cmd, Commands):
+                cmd = Commands(cmd)
+        except Exception:
+            return f"Command {cmd}"
+
+        mapping = {
+            Commands.BUILD_RAILROAD_TRACK: "built railroad track",
+            Commands.REMOVE_RAILROAD_TRACK: "removed railroad track",
+            Commands.BUILD_SINGLE_RAIL: "built a rail piece",
+            Commands.REMOVE_SINGLE_RAIL: "removed a rail piece",
+            Commands.LANDSCAPE_CLEAR: "cleared land",
+            Commands.BUILD_BRIDGE: "built a bridge",
+            Commands.BUILD_RAIL_STATION: "built a rail station",
+            Commands.BUILD_TRAIN_DEPOT: "built a train depot",
+            Commands.BUILD_SINGLE_SIGNAL: "placed a signal",
+            Commands.REMOVE_SINGLE_SIGNAL: "removed a signal",
+            Commands.TERRAFORM_LAND: "terraformed land",
+            Commands.BUILD_OBJECT: "built an object",
+            Commands.BUILD_OBJECT_AREA: "built objects",
+            Commands.BUILD_TUNNEL: "built a tunnel",
+            Commands.REMOVE_FROM_RAIL_STATION: "removed from rail station",
+            Commands.CONVERT_RAIL: "converted rail",
+            Commands.BUILD_RAIL_WAYPOINT: "built a waypoint",
+            Commands.RENAME_WAYPOINT: "renamed a waypoint",
+            Commands.REMOVE_FROM_RAIL_WAYPOINT: "removed from waypoint",
+            Commands.BUILD_ROAD: "built road",
+            Commands.REMOVE_ROAD: "removed road",
+            Commands.BUILD_LONG_ROAD: "built long road",
+            Commands.REMOVE_LONG_ROAD: "removed long road",
+            Commands.BUILD_ROAD_STOP: "built road stop",
+            Commands.REMOVE_ROAD_STOP: "removed road stop",
+            Commands.BUILD_ROAD_DEPOT: "built road depot",
+            Commands.CONVERT_ROAD: "converted road",
+            Commands.BUILD_AIRPORT: "built airport",
+            Commands.BUILD_DOCK: "built dock",
+            Commands.BUILD_SHIP_DEPOT: "built ship depot",
+            Commands.BUILD_BUOY: "built buoy",
+            Commands.PLANT_TREE: "planted trees",
+            Commands.BUILD_VEHICLE: "built vehicle",
+            Commands.SELL_VEHICLE: "sold vehicle",
+            Commands.START_STOP_VEHICLE: "toggled vehicle",
+            Commands.REFIT_VEHICLE: "refit vehicle",
+            Commands.CLONE_VEHICLE: "cloned vehicle",
+            Commands.MOVE_RAIL_VEHICLE: "moved rail vehicle",
+            Commands.FORCE_TRAIN_PROCEED: "forced train",
+            Commands.REVERSE_TRAIN_DIRECTION: "reversed train",
+            Commands.MODIFY_ORDER: "modified order",
+            Commands.SKIP_TO_ORDER: "skipped to order",
+            Commands.DELETE_ORDER: "deleted order",
+            Commands.INSERT_ORDER: "inserted order",
+            Commands.CHANGE_SERVICE_INT: "changed service interval",
+            Commands.RESTORE_ORDER_INDEX: "restored order index",
+            Commands.CREATE_GROUP: "created group",
+            Commands.DELETE_GROUP: "deleted group",
+            Commands.RENAME_GROUP: "renamed group",
+            Commands.ADD_VEH_GROUP: "added vehicle to group",
+            Commands.ADD_SHARED_VEH_GROUP: "added shared vehicle to group",
+            Commands.REMOVE_VEH_GROUP: "removed vehicle from group",
+            Commands.SET_GROUP_FLAG: "set group flag",
+            Commands.SET_GROUP_LIVERY: "set group livery",
+            Commands.SET_AUTOREPLACE: "set autoreplace",
+            Commands.CHANGE_TIMETABLE: "changed timetable",
+            Commands.BULK_CHANGE_TIMETABLE: "bulk changed timetable",
+            Commands.SET_VEH_TIMETABLE_START: "set vehicle timetable start",
+            Commands.AUTOFILL_TIMETABLE: "autofilled timetable",
+            Commands.SET_TIMETABLE_START: "set timetable start",
+            Commands.INCREASE_LOAN: "increased loan",
+            Commands.DECREASE_LOAN: "decreased loan",
+            Commands.SET_COMPANY_MAX_LOAN: "set company max loan",
+            Commands.MONEY_CHEAT: "money cheat",
+            Commands.GIVE_MONEY: "gave money",
+            Commands.FOUND_TOWN: "founded town",
+            Commands.RENAME_TOWN: "renamed town",
+            Commands.DO_TOWN_ACTION: "performed town action",
+            Commands.TOWN_CARGO_GOAL: "set town cargo goal",
+            Commands.TOWN_GROWTH_RATE: "set town growth rate",
+            Commands.TOWN_RATING: "changed town rating",
+            Commands.TOWN_SET_TEXT: "set town text",
+            Commands.EXPAND_TOWN: "expanded town",
+            Commands.DELETE_TOWN: "deleted town",
+            Commands.BUILD_INDUSTRY: "built industry",
+            Commands.BUILD_INDUSTRY_PROSPECT: "prospected industry",
+            Commands.SET_INDUSTRY_PRODUCTION: "set industry production",
+            Commands.SET_INDUSTRY_TEXT: "set industry text",
+            Commands.SET_COMPANY_MANAGER_FACE: "set company manager face",
+            Commands.SET_COMPANY_COLOUR: "set company colour",
+            Commands.RENAME_COMPANY: "renamed company",
+            Commands.RENAME_PRESIDENT: "renamed president",
+            Commands.BUY_COMPANY: "bought company",
+            Commands.COMPANY_CTRL: "company control",
+            Commands.CHANGE_COMPANY_SETTING: "changed company setting",
+            Commands.CUSTOM_NEWS_ITEM: "custom news",
+            Commands.CREATE_SUBSIDY: "created subsidy",
+            Commands.PAUSE: "pause",
+            Commands.PLACE_SIGN: "placed sign",
+            Commands.RENAME_SIGN: "renamed sign",
+            Commands.CREATE_GOAL: "created goal",
+            Commands.REMOVE_GOAL: "removed goal",
+            Commands.QUESTION: "question",
+            Commands.GOAL_QUESTION_ANSWER: "answered goal question",
+            Commands.CREATE_STORY_PAGE: "created story page",
+            Commands.CREATE_STORY_PAGE_ELEMENT: "created story element",
+            Commands.UPDATE_STORY_PAGE_ELEMENT: "updated story element",
+            Commands.SET_STORY_PAGE_TITLE: "set story title",
+            Commands.SET_STORY_PAGE_DATE: "set story date",
+            Commands.SHOW_STORY_PAGE: "showed story page",
+            Commands.REMOVE_STORY_PAGE: "removed story page",
+            Commands.REMOVE_STORY_PAGE_ELEMENT: "removed story element",
+            Commands.SCROLL_VIEWPORT: "scrolled viewport",
+            Commands.STORY_PAGE_BUTTON: "story page button",
+            Commands.CREATE_LEAGUE_TABLE: "created league table",
+            Commands.CREATE_LEAGUE_TABLE_ELEMENT: "created league element",
+            Commands.UPDATE_LEAGUE_TABLE_ELEMENT_DATA: "updated league data",
+            Commands.UPDATE_LEAGUE_TABLE_ELEMENT_SCORE: "updated league score",
+            Commands.REMOVE_LEAGUE_TABLE_ELEMENT: "removed league element",
+            Commands.LEVEL_LAND: "levelled land",
+        }
+        return mapping.get(cmd, f"{cmd.name.lower().replace('_', ' ')}")
+
+    def _classify_construction(self, cmd: Union[Commands, int]) -> Tuple[bool, Optional[str]]:
+        """Return (is_construction, category) for a command."""
+        try:
+            if not isinstance(cmd, Commands):
+                cmd = Commands(cmd)
+        except Exception:
+            return False, None
+
+        rail_cmds = {
+            Commands.BUILD_RAILROAD_TRACK,
+            Commands.BUILD_SINGLE_RAIL,
+            Commands.BUILD_RAIL_WAYPOINT,
+            Commands.BUILD_TRAIN_DEPOT,
+            Commands.CONVERT_RAIL,
+            Commands.BUILD_SINGLE_SIGNAL,
+        }
+        road_cmds = {
+            Commands.BUILD_ROAD,
+            Commands.BUILD_LONG_ROAD,
+            Commands.BUILD_ROAD_STOP,
+            Commands.BUILD_ROAD_DEPOT,
+            Commands.CONVERT_ROAD,
+        }
+        station_like = {
+            Commands.BUILD_RAIL_STATION,
+            Commands.BUILD_AIRPORT,
+            Commands.BUILD_DOCK,
+            Commands.BUILD_SHIP_DEPOT,
+            Commands.BUILD_BUOY,
+        }
+        landscaping = {
+            Commands.LANDSCAPE_CLEAR,
+            Commands.TERRAFORM_LAND,
+            Commands.LEVEL_LAND,
+            Commands.PLANT_TREE,
+        }
+        objects = {Commands.BUILD_OBJECT, Commands.BUILD_OBJECT_AREA}
+        industry = {Commands.BUILD_INDUSTRY, Commands.BUILD_INDUSTRY_PROSPECT}
+        tunnel_bridge = {Commands.BUILD_TUNNEL, Commands.BUILD_BRIDGE}
+
+        if cmd in rail_cmds:
+            return True, "rail"
+        if cmd in road_cmds:
+            return True, "road"
+        if cmd in station_like:
+            return True, "station"
+        if cmd in objects:
+            return True, "object"
+        if cmd in industry:
+            return True, "industry"
+        if cmd in tunnel_bridge:
+            return True, "tunnel_bridge"
+        if cmd in landscaping:
+            return True, "landscaping"
+        return False, None
 
     def _handle_server_chat(self, packet: Packet) -> None:
         """Handle chat message"""
@@ -1153,3 +1674,37 @@ class OpenTTDClient:
             self.connection.send_packet(packet)
         except Exception as e:
             logger.error(f"Failed to send ACK: {e}")
+
+    def _get_company_from_command(self, params_bytes: bytes) -> int:
+        """Extract company ID from command parameters."""
+        try:
+            # Company ID is typically in the second byte for most commands
+            if len(params_bytes) >= 2:
+                return params_bytes[1]
+        except Exception:
+            pass
+        return 0
+
+    def _bg_parse(self, map_data: bytes) -> None:
+        """Background map parsing with vehicle extraction."""
+        try:
+            logger.info("Parsing map data (background)...")
+
+            # Relay progress to listeners
+            def _progress_cb(p: float, stage: str) -> None:
+                try:
+                    self._emit_event("map_parse_progress", p, stage)
+                except Exception:
+                    pass
+
+            parsed = load_savefile_from_bytes(
+                map_data, parsed=True, silent=True, progress_callback=_progress_cb
+            )
+            self._parsed_save = parsed  # type: ignore[assignment]
+
+            # Parse vehicles from savefile
+            self._parse_vehicles_from_save(parsed)
+
+            self._emit_event("map_parsed")
+        except Exception as e:
+            logger.error(f"Error parsing map data: {e}")

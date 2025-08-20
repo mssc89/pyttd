@@ -160,6 +160,7 @@ class MapData:
     dim_x: int
     dim_y: int
     tile_count: int
+    flatbuffers_map: Optional[bytes] = None
 
 
 @dataclass

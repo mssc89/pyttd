@@ -21,6 +21,13 @@ class CompanyID(IntEnum):
     SIXTH = 5
     SEVENTH = 6
     EIGHTH = 7
+    NINTH = 8
+    TENTH = 9
+    ELEVENTH = 10
+    TWELFTH = 11
+    THIRTEENTH = 12
+    FOURTEENTH = 13
+    FIFTEENTH = 14
     COMPANY_NEW_COMPANY = 254  # Used for requesting new company creation
     SPECTATOR = 255
     COMPANY_SPECTATOR = 255  # Alias for spectator mode

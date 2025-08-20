@@ -223,3 +223,26 @@ class BinaryReader:
                 chunks.append((chunk_id, pos))
             pos += 1
         return chunks
+
+    def read_riff_chunk_bytes(self, chunk_id: bytes) -> Optional[bytes]:
+        """Read a CH_RIFF chunk payload by ID without changing current position.
+
+        Returns the raw payload bytes, or None if not found or not a RIFF chunk.
+        """
+        pos = self.find_chunk(chunk_id)
+        if pos is None:
+            return None
+        # Layout: [4 bytes tag][1 byte type][3 bytes length_low]
+        if pos + 8 > len(self.data):
+            return None
+        type_byte = self.data[pos + 4]
+        if (type_byte & 0x0F) != ChunkType.CH_RIFF:
+            return None
+        length_low = (self.data[pos + 5] << 16) | (self.data[pos + 6] << 8) | self.data[pos + 7]
+        length = length_low | ((type_byte >> 4) << 24)
+        start = pos + 8
+        end = start + length
+        if end > len(self.data):
+            # Corrupt; clamp to available data
+            end = len(self.data)
+        return self.data[start:end]

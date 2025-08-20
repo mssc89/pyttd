@@ -66,7 +66,7 @@ def main():
 
         # Load with parsed data (human-readable)
         pbar, _progress = make_progress("Parsing (parsed)")
-        parsed_data = load_savefile_comprehensive(
+        parsed_data = load_savefile(
             savefile_path, silent=True, parsed=True, progress_callback=_progress
         )
         print(f"Loaded parsed data")
@@ -84,7 +84,7 @@ def main():
         if pbar is not None:
             pbar.close()
         pbar2, _progress2 = make_progress("Parsing (raw)")
-        raw_data = load_savefile_comprehensive(
+        raw_data = load_savefile(
             savefile_path, silent=True, parsed=False, progress_callback=_progress2
         )
         if pbar2 is not None:

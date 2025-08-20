@@ -1,6 +1,6 @@
 """Save file loading and parsing modules"""
 
-from .parser import SaveParser, load_savefile
+from .parser import SaveParser, load_savefile, load_savefile_from_bytes
 from .reader import BinaryReader, ChunkType, SaveLoadType
 from .formatter import (
     convert_date_to_year,
@@ -45,11 +45,20 @@ from .models import (
     InflationInfo,
 )
 from .exporter import SaveFileExporter, export_savefile_to_json, export_savefile_to_string
+from .map_flatbuffers import build_map_flatbuffer, MapFB
+from .tiles import (
+    decode_tile_type,
+    decode_owner,
+    decode_industry_info,
+    owner_display,
+    industry_type_display,
+)
 
 __all__ = [
     # Core
     "SaveParser",
     "load_savefile",
+    "load_savefile_from_bytes",
     "BinaryReader",
     "ChunkType",
     "SaveLoadType",
@@ -98,4 +107,13 @@ __all__ = [
     "SaveFileExporter",
     "export_savefile_to_json",
     "export_savefile_to_string",
+    # FlatBuffers map
+    "build_map_flatbuffer",
+    "MapFB",
+    # Tile helpers
+    "decode_tile_type",
+    "decode_owner",
+    "decode_industry_info",
+    "owner_display",
+    "industry_type_display",
 ]

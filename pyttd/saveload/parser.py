@@ -77,6 +77,7 @@ from .formatter import (
     format_inflation_value,
     format_company_data,
 )
+from .map_flatbuffers import build_map_flatbuffer
 
 
 class Field:
@@ -289,9 +290,6 @@ class SaveParser:
                     "utf-8", errors="ignore"
                 )
                 self.reader.pos += key_len
-                # Skip save-only 'type' field
-                if key == "type":
-                    continue
                 is_list = has_len and ftype not in (10, 11)
                 fields.append(Field(key, ftype, is_list))
 
@@ -451,6 +449,52 @@ class SaveParser:
     def _parse_maps_chunk(self) -> None:
         """Parse MAPS chunk (map settings)"""
         self._parse_table_chunk("MAPS")
+        try:
+            maps_list = self.raw_data.get("maps", [])
+            if isinstance(maps_list, list) and maps_list:
+                dim_x_val = int(maps_list[0].get("dim_x", 256))
+                dim_y_val = int(maps_list[0].get("dim_y", 256))
+            else:
+                dim_x_val = 256
+                dim_y_val = 256
+
+            size = dim_x_val * dim_y_val
+            planes: Dict[str, Any] = {}
+            # RIFF planes as per map_sl.cpp
+            for tag, elem_size, key in (
+                (b"MAPT", 1, "type"),
+                (b"MAPH", 1, "height"),
+                (b"MAPO", 1, "m1"),
+                (b"MAP2", 2, "m2"),
+                (b"M3LO", 1, "m3"),
+                (b"M3HI", 1, "m4"),
+                (b"MAP5", 1, "m5"),
+                (b"MAPE", 1, "m6"),
+                (b"MAP7", 1, "m7"),
+                (b"MAP8", 2, "m8"),
+            ):
+                payload = self.reader.read_riff_chunk_bytes(tag)
+                if payload is None:
+                    continue
+                # Some planes are shorter on small maps; clamp
+                # Ensure correct element count
+                if elem_size == 1:
+                    arr = list(payload[:size])
+                    if len(arr) < size:
+                        arr.extend([0] * (size - len(arr)))
+                else:
+                    # 2-byte big-endian unsigned
+                    arr = []
+                    data = payload
+                    for i in range(0, min(len(data), size * 2), 2):
+                        arr.append((data[i] << 8) | data[i + 1])
+                    if len(arr) < size:
+                        arr.extend([0] * (size - len(arr)))
+                planes[key] = arr
+            self.raw_data["map_planes"] = planes
+        except Exception:
+            # Non-fatal
+            pass
 
     def _parse_vehicles_chunk(self) -> None:
         """Parse VEHS chunk (vehicles) - special sparse table handling"""
@@ -729,7 +773,21 @@ class SaveParser:
             dim_x_val = int(self.raw_data.get("map_dim_x", 256))
             dim_y_val = int(self.raw_data.get("map_dim_y", 256))
 
-        map_data = MapData(dim_x=dim_x_val, dim_y=dim_y_val, tile_count=dim_x_val * dim_y_val)
+        # Build FlatBuffers map if planes available
+        flatbuf_map = None
+        try:
+            planes = self.raw_data.get("map_planes")
+            if isinstance(planes, dict) and planes:
+                flatbuf_map = build_map_flatbuffer(dim_x_val, dim_y_val, planes)
+        except Exception:
+            flatbuf_map = None
+
+        map_data = MapData(
+            dim_x=dim_x_val,
+            dim_y=dim_y_val,
+            tile_count=dim_x_val * dim_y_val,
+            flatbuffers_map=flatbuf_map,
+        )
 
         # Format companies
         companies_raw = self.raw_data.get("plyr", [])
@@ -899,3 +957,65 @@ def load_savefile(
     """
     parser = SaveParser(filepath, silent=silent)
     return parser.parse_savefile(parsed=parsed, progress_callback=progress_callback)
+
+
+def load_savefile_from_bytes(
+    raw_bytes: bytes,
+    parsed: bool = True,
+    silent: bool = True,
+    progress_callback: Optional[Any] = None,
+) -> Union[Dict[str, Any], SaveFileData]:
+    """
+    Load and parse an OpenTTD savefile provided as in-memory bytes.
+
+    Intended for parsing map data streamed from a multiplayer server.
+    The function will attempt to detect whether the bytes include an OTTX header
+    or are a raw LZMA stream.
+
+    Args:
+        raw_bytes: Bytes of the savefile or map data
+        parsed: Whether to return parsed (human-readable) data or raw data
+        silent: Whether to suppress debug output
+        progress_callback: Optional callback(progress: float, stage: str)
+
+    Returns:
+        Either a raw dictionary or a structured SaveFileData object
+    """
+    # Prepare a parser instance (filename is only used for logging metadata)
+    parser = SaveParser("<bytes>", silent=silent)
+
+    # Try to detect header and decompress appropriately
+    data: bytes
+    try:
+        if len(raw_bytes) >= 8 and raw_bytes[:4] == b"OTTX":
+            # Includes header: [OTTX][version_u32_be][lzma_stream]
+            version_int = struct.unpack(">I", raw_bytes[4:8])[0]
+            parser.save_version = (version_int >> 16) & 0xFFFF
+            parser.minor_version = (version_int >> 8) & 0xFF
+            data = lzma.decompress(raw_bytes[8:])
+        else:
+            # Might be a naked LZMA stream or already decompressed RIFF
+            try:
+                data = lzma.decompress(raw_bytes)
+            except Exception:
+                data = raw_bytes
+    except Exception:
+        # On any decompression error, fall back to raw bytes
+        data = raw_bytes
+
+    # Set reader directly and run the normal parsing pipeline
+    parser.reader = BinaryReader(data)
+
+    # Progress init
+    parser._progress_callback = progress_callback
+    parser._progress_value = 0.0
+    parser._progress_set(0.05, "loaded")
+    parser._parse_all_chunks()
+
+    if parsed:
+        result = parser._create_parsed_data()
+        parser._progress_set(1.0, "done")
+        return result
+    else:
+        parser._progress_set(1.0, "done")
+        return parser.raw_data
